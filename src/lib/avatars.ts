@@ -2,6 +2,14 @@ import { prisma } from './db';
 import path from 'path';
 import fs from 'fs';
 
+function fisherYatesShuffle<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 export async function initializeImagePool(): Promise<void> {
   const avatarsDir = path.join(process.cwd(), 'public', 'avatars');
   
@@ -41,7 +49,7 @@ export async function claimAvatar(): Promise<string> {
 
   if (available.length === 0) {
     if (used.length === 0) return '/avatars/default.svg';
-    available = used.sort(() => Math.random() - 0.5);
+    available = fisherYatesShuffle(used);
     used = [];
   }
 

@@ -1,6 +1,14 @@
 import { prisma } from './db';
 import { decideBotAction, generateContent, BotDecision } from './lmstudio';
 
+function fisherYatesShuffle<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 const TICK_INTERVAL_MS = 45000;
 const BOTS_PER_TICK_RATIO = 0.3;
 
@@ -51,7 +59,7 @@ export async function runTick(timelineId: string): Promise<TickResult> {
   }
 
   const numToWake = Math.max(1, Math.floor(allBots.length * BOTS_PER_TICK_RATIO));
-  const shuffled = [...allBots].sort(() => Math.random() - 0.5);
+  const shuffled = fisherYatesShuffle([...allBots]);
   const awakeBots = shuffled.slice(0, numToWake);
 
   const recentPosts = await prisma.post.findMany({
