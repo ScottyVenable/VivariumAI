@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./vivarium.db"
+}
+
+model Timeline {
+  id          String   @id @default(cuid())
+  name        String
+  worldType   String   @default("EARTH_MIRROR")
+  globalMood  Float    @default(0.5)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  bots        Bot[]
+  posts       Post[]
+}
+
+model Bot {
+  id             String   @id @default(cuid())
+  username       String   @unique
+  displayName    String
+  bio            String?
+  avatarUrl      String?
+  tier           String   @default("SIMPLE_USER")
+  isHuman        Boolean  @default(false)
+  
+  influenceability Float  @default(0.5)
+  reactivity       Float  @default(0.5)
+  compassion       Float  @default(0.5)
+  extraversion     Float  @default(0.5)
+  reasoningSkill   Float  @default(0.5)
+  humanSentiment   Float  @default(0.5)
+  
+  simulatedAge   Int      @default(25)
+  occupation     String   @default("Digital Citizen")
+  netWorth       Float    @default(1000.0)
+  
+  emotionalState String?
+  followerCount  Int      @default(0)
+  followingCount Int      @default(0)
+  postCount      Int      @default(0)
+  
+  timelineId     String
+  timeline       Timeline @relation(fields: [timelineId], references: [id])
+  posts          Post[]
+  likes          Like[]
+  followedBy     Follow[] @relation("FollowTarget")
+  following      Follow[] @relation("FollowSource")
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Post {
+  id             String   @id @default(cuid())
+  content        String
+  hashtags       String   @default("[]")
+  emotionalState String?
+  
+  authorId       String
+  author         Bot      @relation(fields: [authorId], references: [id])
+  
+  timelineId     String
+  timeline       Timeline @relation(fields: [timelineId], references: [id])
+  
+  parentId       String?
+  parent         Post?    @relation("PostReplies", fields: [parentId], references: [id])
+  replies        Post[]   @relation("PostReplies")
+  
+  likes          Like[]
+  likeCount      Int      @default(0)
+  replyCount     Int      @default(0)
+  
+  createdAt      DateTime @default(now())
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  botId     String
+  bot       Bot      @relation(fields: [botId], references: [id])
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id])
+  createdAt DateTime @default(now())
+  
+  @@unique([botId, postId])
+}
+
+model Follow {
+  id         String   @id @default(cuid())
+  sourceId   String
+  source     Bot      @relation("FollowSource", fields: [sourceId], references: [id])
+  targetId   String
+  target     Bot      @relation("FollowTarget", fields: [targetId], references: [id])
+  createdAt  DateTime @default(now())
+  
+  @@unique([sourceId, targetId])
+}
+
+model ImagePool {
+  id              String @id @default("singleton")
+  availableImages String @default("[]")
+  usedImages      String @default("[]")
+}
