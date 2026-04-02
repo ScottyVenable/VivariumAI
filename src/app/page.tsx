@@ -53,35 +53,40 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen bg-black flex flex-col">
-      <header className="border-b border-white/10 px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-black text-white tracking-tight">
+      <header className="border-b border-white/10 px-4 py-3 sm:px-6 sm:py-4">
+        <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl font-black text-white tracking-tight sm:text-2xl">
               V I V A R I U M
             </h1>
-            <p className="text-gray-500 text-xs mt-0.5">
+            <p className="text-gray-500 text-[11px] mt-0.5 sm:text-xs">
               Multi-agent social simulation engine
             </p>
           </div>
           <button
             onClick={() => setCreating(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-white text-black font-bold text-sm rounded-full hover:bg-gray-200 transition-colors"
+            aria-label="New Timeline"
+            className="flex items-center gap-2 whitespace-nowrap px-3 py-2 bg-white text-black font-bold text-xs rounded-full hover:bg-gray-200 transition-colors sm:px-4 sm:text-sm"
           >
             <Plus className="w-4 h-4" />
-            New Timeline
+            <span className="hidden sm:inline">New Timeline</span>
+            <span className="sm:hidden">New</span>
           </button>
         </div>
       </header>
 
-      <div className="max-w-4xl mx-auto w-full px-6 py-8 flex-1">
+      <div className="max-w-4xl mx-auto w-full px-4 py-6 flex-1 sm:px-6 sm:py-8">
         {creating && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-950 border border-white/20 rounded-2xl p-6 w-full max-w-md">
+            <div className="bg-gray-950 border border-white/20 rounded-2xl p-5 w-full max-w-md max-h-[90vh] overflow-y-auto sm:p-6">
               <h2 className="text-xl font-bold text-white mb-4">Create New Timeline</h2>
               <form onSubmit={handleCreate} className="space-y-4">
                 <div>
-                  <label className="text-sm text-gray-400 block mb-1">Timeline Name</label>
+                  <label htmlFor="timeline-name" className="text-sm text-gray-400 block mb-1">
+                    Timeline Name
+                  </label>
                   <input
+                    id="timeline-name"
                     type="text"
                     value={newName}
                     onChange={e => setNewName(e.target.value)}
@@ -91,8 +96,11 @@ export default function HomePage() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm text-gray-400 block mb-1">World Type</label>
+                  <label htmlFor="world-type" className="text-sm text-gray-400 block mb-1">
+                    World Type
+                  </label>
                   <select
+                    id="world-type"
                     value={worldType}
                     onChange={e => setWorldType(e.target.value)}
                     className="w-full bg-white/5 border border-white/20 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-white/40 text-sm appearance-none"
@@ -148,13 +156,13 @@ export default function HomePage() {
             </p>
             <button
               onClick={() => setCreating(true)}
-              className="px-6 py-3 bg-white text-black font-bold rounded-full hover:bg-gray-200 transition-colors"
+              className="px-6 py-3 bg-white text-black font-bold rounded-full hover:bg-gray-200 transition-colors text-sm sm:text-base"
             >
               Create Timeline
             </button>
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             {timelines.map(tl => (
               <Link
                 key={tl.id}
@@ -184,7 +192,7 @@ export default function HomePage() {
                     title={`Global mood: ${Math.round(tl.globalMood * 100)}%`}
                   />
                 </div>
-                <div className="flex items-center gap-4 text-sm text-gray-500">
+                <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500 sm:gap-4">
                   <span className="flex items-center gap-1">
                     <Cpu className="w-3.5 h-3.5" />
                     {tl._count.bots} entities
@@ -193,7 +201,7 @@ export default function HomePage() {
                     <Globe className="w-3.5 h-3.5" />
                     {tl._count.posts} posts
                   </span>
-                  <span className="flex items-center gap-1 ml-auto">
+                  <span className="flex items-center gap-1 sm:ml-auto">
                     <Clock className="w-3.5 h-3.5" />
                     {formatDistanceToNow(new Date(tl.createdAt), { addSuffix: true })}
                   </span>

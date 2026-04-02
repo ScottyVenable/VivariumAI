@@ -37,7 +37,7 @@ export function PostCard({ post, onLike, onReply, className }: PostCardProps) {
   return (
     <article
       className={cn(
-        'border-b border-white/10 px-4 py-4 hover:bg-white/5 transition-colors cursor-pointer',
+        'border-b border-white/10 px-3 py-4 hover:bg-white/5 transition-colors cursor-pointer sm:px-4',
         className
       )}
     >
@@ -63,7 +63,7 @@ export function PostCard({ post, onLike, onReply, className }: PostCardProps) {
             {post.author.occupation}
           </div>
 
-          <p className="text-gray-100 text-sm leading-relaxed whitespace-pre-wrap">
+          <p className="text-gray-100 text-sm leading-relaxed whitespace-pre-wrap break-words">
             {post.content}
           </p>
 
@@ -83,7 +83,7 @@ export function PostCard({ post, onLike, onReply, className }: PostCardProps) {
             </div>
           )}
 
-          <div className="mt-3 flex items-center gap-6 text-gray-500">
+          <div className="mt-3 flex items-center justify-between gap-4 text-gray-500 sm:justify-start sm:gap-6">
             <button
               onClick={() => onReply?.(post.id)}
               className="flex items-center gap-1.5 text-sm hover:text-blue-400 transition-colors group"

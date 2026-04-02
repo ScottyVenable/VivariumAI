@@ -51,8 +51,8 @@ export function PulseSidebar({ timelineId }: PulseSidebarProps) {
     : 'text-gray-500';
 
   return (
-    <aside className="w-80 flex-shrink-0 hidden xl:block">
-      <div className="sticky top-4 space-y-4">
+    <aside className="order-1 w-full lg:w-80 lg:flex-shrink-0">
+      <div className="grid gap-3 sm:grid-cols-2 lg:sticky lg:top-4 lg:grid-cols-1 lg:gap-4">
         <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <Activity className="w-4 h-4 text-indigo-400" />

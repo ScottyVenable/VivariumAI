@@ -83,9 +83,27 @@ export default function TimelinePage() {
   }, [timelineId]);
 
   useEffect(() => {
-    loadData().finally(() => setLoading(false));
-    const interval = setInterval(loadData, 20000);
-    return () => clearInterval(interval);
+    let isMounted = true;
+
+    const initialize = async () => {
+      try {
+        await loadData();
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void initialize();
+    const interval = setInterval(() => {
+      void loadData();
+    }, 20000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [loadData]);
 
   const handleRefresh = async () => {
@@ -130,13 +148,13 @@ export default function TimelinePage() {
   return (
     <div className="min-h-screen bg-black">
       <header className="sticky top-0 z-40 bg-black/90 backdrop-blur border-b border-white/10">
-        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-4">
+        <div className="max-w-6xl mx-auto px-4 py-3 min-h-14 flex items-center gap-3 sm:gap-4">
           <Link href="/" className="text-gray-400 hover:text-white transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </Link>
-          <div className="flex-1">
-            <h1 className="font-bold text-white text-sm">{timeline?.name}</h1>
-            <div className="text-gray-500 text-xs flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <h1 className="font-bold text-white text-sm truncate sm:text-base">{timeline?.name}</h1>
+            <div className="text-gray-500 text-xs flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="flex items-center gap-1">
                 <Cpu className="w-3 h-3" />
                 {timeline?._count.bots ?? 0} entities
@@ -154,8 +172,10 @@ export default function TimelinePage() {
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto px-4 py-4 flex gap-6">
-        <main className="flex-1 min-w-0 border-x border-white/10">
+      <div className="max-w-6xl mx-auto px-4 py-4 flex flex-col gap-4 lg:flex-row lg:gap-6">
+        <PulseSidebar timelineId={timelineId} />
+
+        <main className="order-2 lg:order-1 flex-1 min-w-0 border border-white/10 rounded-2xl overflow-hidden lg:border-y-0 lg:border-x lg:rounded-none">
           {posts.length === 0 ? (
             <div className="text-center py-16">
               <div className="text-4xl mb-3">💤</div>
@@ -178,8 +198,6 @@ export default function TimelinePage() {
             ))
           )}
         </main>
-
-        <PulseSidebar timelineId={timelineId} />
       </div>
 
       <GodModeDashboard
