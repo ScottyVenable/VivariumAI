@@ -9,6 +9,6 @@ test('home page supports the mobile-first timeline flow', async ({ page }) => {
   await page.getByRole('button', { name: /new timeline/i }).click();
 
   await expect(page.getByRole('heading', { name: /create new timeline/i })).toBeVisible();
-  await expect(page.getByLabel('Timeline Name')).toBeVisible();
-  await expect(page.getByLabel('World Type')).toBeVisible();
+  await expect(page.getByPlaceholder(/terra nova/i)).toBeVisible();
+  await expect(page.getByRole('combobox').first()).toBeVisible();
 });

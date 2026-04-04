@@ -28,7 +28,7 @@ Optional parameters:
 ## Playwright
 
 ```bash
-npx playwright install --with-deps chromium
+npm run test:e2e:install
 npm run test:e2e
 ```
 
