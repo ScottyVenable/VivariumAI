@@ -37,7 +37,7 @@ export function PostCard({ post, onLike, onReply, className }: PostCardProps) {
   return (
     <article
       className={cn(
-        'border-b border-white/10 px-3 py-4 hover:bg-white/5 transition-colors cursor-pointer sm:px-4',
+        'rounded-3xl border border-zinc-900/50 bg-[#111111] px-4 py-4 transition-colors hover:border-zinc-800/70 hover:bg-[#141414] cursor-pointer',
         className
       )}
     >
@@ -54,12 +54,12 @@ export function PostCard({ post, onLike, onReply, className }: PostCardProps) {
               {post.author.displayName}
             </span>
             <TierBadge tier={post.author.tier} />
-            <span className="text-gray-500 text-sm">@{post.author.username}</span>
-            <span className="text-gray-600 text-xs">·</span>
-            <span className="text-gray-500 text-xs">{timeAgo}</span>
+            <span className="text-zinc-500 text-sm">@{post.author.username}</span>
+            <span className="text-zinc-700 text-xs">·</span>
+            <span className="text-zinc-500 text-xs">{timeAgo}</span>
           </div>
           
-          <div className="text-xs text-indigo-400/70 mb-1.5">
+          <div className="mb-1.5 text-xs text-zinc-400">
             {post.author.occupation}
           </div>
 
@@ -70,7 +70,7 @@ export function PostCard({ post, onLike, onReply, className }: PostCardProps) {
           {post.hashtags.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
               {post.hashtags.map(tag => (
-                <span key={tag} className="text-blue-400 text-sm hover:underline cursor-pointer">
+                <span key={tag} className="text-purple-400 text-sm hover:underline cursor-pointer">
                   {tag}
                 </span>
               ))}
@@ -83,22 +83,22 @@ export function PostCard({ post, onLike, onReply, className }: PostCardProps) {
             </div>
           )}
 
-          <div className="mt-3 flex items-center justify-between gap-4 text-gray-500 sm:justify-start sm:gap-6">
+          <div className="mt-3 flex items-center justify-between gap-4 text-zinc-500 sm:justify-start sm:gap-6">
             <button
               onClick={() => onReply?.(post.id)}
-              className="flex items-center gap-1.5 text-sm hover:text-blue-400 transition-colors group"
+              className="flex items-center gap-1.5 text-sm transition-colors hover:text-purple-400 group"
             >
-              <MessageCircle className="w-4 h-4 group-hover:text-blue-400" />
+              <MessageCircle className="w-4 h-4 group-hover:text-purple-400" />
               <span>{post.replyCount}</span>
             </button>
             <button
               onClick={() => onLike?.(post.id)}
-              className="flex items-center gap-1.5 text-sm hover:text-red-400 transition-colors group"
+              className="flex items-center gap-1.5 text-sm transition-colors hover:text-purple-400 group"
             >
-              <Heart className="w-4 h-4 group-hover:text-red-400" />
+              <Heart className="w-4 h-4 group-hover:text-purple-400" />
               <span>{post.likeCount}</span>
             </button>
-            <button className="flex items-center gap-1.5 text-sm hover:text-green-400 transition-colors">
+            <button className="flex items-center gap-1.5 text-sm transition-colors hover:text-purple-400">
               <Share2 className="w-4 h-4" />
             </button>
           </div>

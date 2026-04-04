@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { generateBots } from '@/lib/bot-generator';
+import { isBotTier, isObject, parseBoundedInt, parseString } from '@/lib/validation';
 
 export async function GET(
   req: NextRequest,
@@ -26,10 +27,15 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const { tier = 'SIMPLE_USER', count = 1 } = await req.json() as {
-    tier?: string;
-    count?: number;
-  };
+  const raw = await req.json() as unknown;
+
+  if (!isObject(raw)) {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  const tierInput = parseString(raw.tier, 'SIMPLE_USER');
+  const tier = isBotTier(tierInput) ? tierInput : 'SIMPLE_USER';
+  const count = parseBoundedInt(raw.count, 1, 1, 100);
 
   const ids = await generateBots({
     tier,

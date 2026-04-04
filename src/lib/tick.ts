@@ -9,8 +9,15 @@ function fisherYatesShuffle<T>(arr: T[]): T[] {
   return arr;
 }
 
-const TICK_INTERVAL_MS = 45000;
+const TICK_MIN_INTERVAL_MS = 30000;
+const TICK_MAX_INTERVAL_MS = 60000;
 const BOTS_PER_TICK_RATIO = 0.3;
+
+function getRandomTickIntervalMs(): number {
+  return Math.floor(
+    Math.random() * (TICK_MAX_INTERVAL_MS - TICK_MIN_INTERVAL_MS + 1) + TICK_MIN_INTERVAL_MS
+  );
+}
 
 export interface TickResult {
   tickId: string;
@@ -250,32 +257,41 @@ async function executeAction(
   }
 }
 
-let tickInterval: ReturnType<typeof setInterval> | null = null;
+let tickInterval: ReturnType<typeof setTimeout> | null = null;
 let activeTimelineId: string | null = null;
 
 export function startTickLoop(timelineId: string): void {
   if (tickInterval) {
-    clearInterval(tickInterval);
+    clearTimeout(tickInterval);
   }
   activeTimelineId = timelineId;
-  
-  tickInterval = setInterval(async () => {
-    if (activeTimelineId) {
-      try {
-        await runTick(activeTimelineId);
-        console.log(`[TICK] Completed tick for timeline ${activeTimelineId}`);
-      } catch (err) {
-        console.error('[TICK] Error during tick:', err);
+
+  const scheduleNextTick = () => {
+    const nextInterval = getRandomTickIntervalMs();
+
+    tickInterval = setTimeout(async () => {
+      if (activeTimelineId) {
+        try {
+          await runTick(activeTimelineId);
+          console.log(`[TICK] Completed tick for timeline ${activeTimelineId}`);
+        } catch (err) {
+          console.error('[TICK] Error during tick:', err);
+        }
+        scheduleNextTick();
       }
-    }
-  }, TICK_INTERVAL_MS);
-  
-  console.log(`[TICK] Started tick loop for timeline ${timelineId}`);
+    }, nextInterval);
+  };
+
+  scheduleNextTick();
+
+  console.log(
+    `[TICK] Started stochastic tick loop for timeline ${timelineId} (${TICK_MIN_INTERVAL_MS / 1000}-${TICK_MAX_INTERVAL_MS / 1000}s)`
+  );
 }
 
 export function stopTickLoop(): void {
   if (tickInterval) {
-    clearInterval(tickInterval);
+    clearTimeout(tickInterval);
     tickInterval = null;
     activeTimelineId = null;
     console.log('[TICK] Stopped tick loop');

@@ -1,5 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import {
+  clamp01,
+  isBotTier,
+  isObject,
+  parseNonNegativeNumber,
+  parseString,
+} from '@/lib/validation';
+
+const EDITABLE_FIELDS = new Set([
+  'displayName',
+  'bio',
+  'avatarUrl',
+  'tier',
+  'influenceability',
+  'reactivity',
+  'compassion',
+  'extraversion',
+  'reasoningSkill',
+  'humanSentiment',
+  'simulatedAge',
+  'occupation',
+  'netWorth',
+  'emotionalState',
+]);
 
 export async function GET(
   _req: NextRequest,
@@ -34,7 +58,57 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const updates = await req.json() as Record<string, unknown>;
+  const raw = await req.json() as unknown;
+
+  if (!isObject(raw)) {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  const updates: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(raw)) {
+    if (!EDITABLE_FIELDS.has(key)) continue;
+
+    if (key === 'tier' && typeof value === 'string') {
+      const tier = parseString(value);
+      if (isBotTier(tier)) {
+        updates.tier = tier;
+      }
+      continue;
+    }
+
+    if (key === 'displayName' || key === 'bio' || key === 'avatarUrl' || key === 'occupation' || key === 'emotionalState') {
+      updates[key] = parseString(value);
+      continue;
+    }
+
+    if (
+      key === 'influenceability' ||
+      key === 'reactivity' ||
+      key === 'compassion' ||
+      key === 'extraversion' ||
+      key === 'reasoningSkill' ||
+      key === 'humanSentiment'
+    ) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        updates[key] = clamp01(value);
+      }
+      continue;
+    }
+
+    if (key === 'simulatedAge' && typeof value === 'number' && Number.isFinite(value)) {
+      updates.simulatedAge = Math.max(13, Math.min(120, Math.floor(value)));
+      continue;
+    }
+
+    if (key === 'netWorth') {
+      updates.netWorth = parseNonNegativeNumber(value, 0);
+    }
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: 'No valid fields provided' }, { status: 400 });
+  }
   
   const bot = await prisma.bot.update({
     where: { id },

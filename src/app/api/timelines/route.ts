@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { generateBots } from '@/lib/bot-generator';
 import { initializeImagePool } from '@/lib/avatars';
+import { isObject, isWorldType, parseBoundedInt, parseString } from '@/lib/validation';
 
 export async function GET() {
   const timelines = await prisma.timeline.findMany({
@@ -16,11 +17,16 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { name, worldType = 'EARTH_MIRROR', initialBotCount = 20 } = await req.json() as {
-    name: string;
-    worldType?: string;
-    initialBotCount?: number;
-  };
+  const raw = await req.json() as unknown;
+
+  if (!isObject(raw)) {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  const name = parseString(raw.name);
+  const worldTypeInput = parseString(raw.worldType, 'EARTH_MIRROR');
+  const worldType = isWorldType(worldTypeInput) ? worldTypeInput : 'EARTH_MIRROR';
+  const initialBotCount = parseBoundedInt(raw.initialBotCount, 20, 1, 200);
 
   if (!name) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 });
