@@ -23,6 +23,48 @@ export interface ContentOutput {
   emotional_state: string;
 }
 
+const MASTER_SYSTEM_PROMPT = `You are the simulation mind of a bot inside Vivarium, an autonomous social-media world. Stay fully in character and produce behavior consistent with the provided personality traits, mood, and timeline context. If structured output is requested, return only valid JSON matching the requested fields.`;
+
+const VALID_ACTIONS: BotAction[] = ['post', 'reply', 'like', 'follow', 'idle'];
+
+function parseJsonObject<T>(raw: string): T {
+  return JSON.parse(raw) as T;
+}
+
+function normalizeDecision(input: Partial<BotDecision> | null | undefined): BotDecision {
+  const action = input?.action;
+  if (!action || !VALID_ACTIONS.includes(action)) {
+    return { action: 'idle' };
+  }
+
+  const targetId = typeof input?.targetId === 'string' && input.targetId.trim().length > 0
+    ? input.targetId.trim()
+    : undefined;
+
+  return targetId ? { action, targetId } : { action };
+}
+
+function normalizeContent(input: Partial<ContentOutput> | null | undefined): ContentOutput | null {
+  const content = typeof input?.content === 'string' ? input.content.trim() : '';
+  const emotionalState = typeof input?.emotional_state === 'string'
+    ? input.emotional_state.trim()
+    : '';
+
+  if (!content || !emotionalState) {
+    return null;
+  }
+
+  const hashtags = Array.isArray(input?.hashtags)
+    ? input.hashtags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
+    : [];
+
+  return {
+    content,
+    hashtags,
+    emotional_state: emotionalState,
+  };
+}
+
 export async function decideBotAction(
   botDna: {
     displayName: string;
@@ -37,7 +79,7 @@ export async function decideBotAction(
   globalMood: number
 ): Promise<BotDecision> {
   try {
-    const systemPrompt = `You are a decision engine for an AI social media bot. Based on the bot's personality and timeline context, output ONLY a valid JSON object with "action" and optionally "targetId". Action must be one of: post, reply, like, follow, idle.`;
+    const systemPrompt = `${MASTER_SYSTEM_PROMPT}\n\nTask: Choose the bot's next social action. Return ONLY valid JSON with "action" and optional "targetId". Action must be one of: post, reply, like, follow, idle.`;
 
     const userPrompt = `Bot Profile:
 - Name: ${botDna.displayName}
@@ -60,15 +102,13 @@ Output JSON: {"action": "post"|"reply"|"like"|"follow"|"idle", "targetId": "post
         { role: 'user', content: userPrompt },
       ],
       max_tokens: 100,
-      temperature: 0.7,
+      temperature: 0.35,
+      response_format: { type: 'json_object' },
     });
 
     const raw = response.choices[0]?.message?.content?.trim() || '{"action":"idle"}';
-    const jsonMatch = raw.match(/\{[^}]+\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]) as BotDecision;
-    }
-    return { action: 'idle' };
+    const parsed = parseJsonObject<Partial<BotDecision>>(raw);
+    return normalizeDecision(parsed);
   } catch {
     return getFallbackDecision(botDna.extraversion, botDna.reactivity);
   }
@@ -89,7 +129,7 @@ export async function generateContent(
   globalMood: number
 ): Promise<ContentOutput> {
   try {
-    const systemPrompt = `You are a social media post generator for an AI entity. Generate authentic, character-consistent social media content. Output ONLY a valid JSON object with "content", "hashtags" (array), and "emotional_state" fields.`;
+    const systemPrompt = `${MASTER_SYSTEM_PROMPT}\n\nTask: Generate authentic, character-consistent social media content. Return ONLY valid JSON with "content", "hashtags" (array), and "emotional_state".`;
 
     const userPrompt = `Character:
 - Name: ${botDna.displayName}
@@ -112,13 +152,17 @@ Output JSON: {"content": "post text here", "hashtags": ["#Tag1", "#Tag2"], "emot
         { role: 'user', content: userPrompt },
       ],
       max_tokens: 300,
-      temperature: 0.85,
+      temperature: 0.7,
       response_format: { type: 'json_object' },
     });
 
     const raw = response.choices[0]?.message?.content?.trim() || '';
-    const parsed = JSON.parse(raw) as ContentOutput;
-    return parsed;
+    const parsed = parseJsonObject<Partial<ContentOutput>>(raw);
+    const normalized = normalizeContent(parsed);
+    if (normalized) {
+      return normalized;
+    }
+    return getFallbackContent(botDna.occupation, botDna.compassion, isReply);
   } catch {
     return getFallbackContent(botDna.occupation, botDna.compassion, isReply);
   }
