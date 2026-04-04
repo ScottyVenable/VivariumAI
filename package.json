@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:ps1": "powershell -ExecutionPolicy Bypass -File ./run-dev.ps1",
     "build": "next build",
     "start": "next start",
     "lint": "eslint src prisma tests playwright.config.ts capacitor.config.ts next.config.mjs tailwind.config.ts eslint.config.mjs",
@@ -11,7 +12,8 @@
     "test:e2e:ui": "playwright test --ui",
     "cap:sync": "npx cap sync",
     "cap:add:android": "npx cap add android",
-    "android:apk": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug",
+    "android:apk": "npm run build && npx cap sync android && cd android && gradlew.bat assembleDebug",
+    "android:local": "powershell -ExecutionPolicy Bypass -File ./android-local.ps1",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts"
