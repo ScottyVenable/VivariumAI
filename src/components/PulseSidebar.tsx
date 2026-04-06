@@ -51,7 +51,7 @@ export function PulseSidebar({ timelineId }: PulseSidebarProps) {
     : 'text-gray-500';
 
   return (
-    <aside className="order-1 w-full lg:w-80 lg:flex-shrink-0 lg:overflow-y-auto">
+    <aside className="order-1 w-full lg:w-64 xl:w-72 lg:flex-shrink-0 lg:overflow-y-auto">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 lg:gap-4">
         <div className="rounded-3xl border border-zinc-900/50 bg-[#111111] p-4">
           <div className="flex items-center gap-2 mb-3">

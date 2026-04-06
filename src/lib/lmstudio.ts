@@ -42,8 +42,11 @@ export interface DecisionBotProfile {
 }
 
 type BatchedDecisionOutput = {
-  botIndex?: number;
+  botIndex?: number | string;
+  index?: number | string;
+  bot_index?: number | string;
   action?: BotAction;
+  decision?: BotAction;
   targetId?: string;
 };
 
@@ -59,6 +62,57 @@ const LOW_SIGNAL_PHRASES = adminConfig.ai.content.lowSignalPhrases;
 const MASTER_SYSTEM_PROMPT = `You are the simulation mind of a bot inside Vivarium, an autonomous social-media world. You write real social-media posts — not descriptions of posts. Stay fully in character based on the provided age, personality, and occupation. If structured output is requested, return only valid JSON matching the requested fields.`;
 
 const UNIFIED_JSON_SCHEMA = `{"mode":"decision|content","action":"post|reply|like|follow|idle","targetId":"","content":"","hashtags":[],"emotional_state":""}`;
+
+const SINGLE_RESPONSE_JSON_SCHEMA = {
+  name: 'vivarium_single_response',
+  schema: {
+    type: 'object',
+    properties: {
+      mode: { type: 'string' },
+      action: { type: 'string', enum: ['post', 'reply', 'like', 'follow', 'idle'] },
+      targetId: { type: 'string' },
+      content: { type: 'string' },
+      hashtags: {
+        type: 'array',
+        items: { type: 'string' },
+      },
+      emotional_state: { type: 'string' },
+    },
+    required: ['action'],
+    additionalProperties: true,
+  },
+  strict: false,
+} as const;
+
+const BATCH_RESPONSE_JSON_SCHEMA = {
+  name: 'vivarium_batch_decisions',
+  schema: {
+    type: 'object',
+    properties: {
+      decisions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            botIndex: {
+              anyOf: [
+                { type: 'integer' },
+                { type: 'string' },
+              ],
+            },
+            action: { type: 'string', enum: ['post', 'reply', 'like', 'follow', 'idle'] },
+            targetId: { type: 'string' },
+          },
+          required: ['botIndex', 'action'],
+          additionalProperties: true,
+        },
+      },
+    },
+    required: ['decisions'],
+    additionalProperties: true,
+  },
+  strict: false,
+} as const;
 
 function ageVoice(age: number): string {
   if (age <= 20) {
@@ -81,17 +135,105 @@ function ageVoice(age: number): string {
 
 const VALID_ACTIONS: BotAction[] = ['post', 'reply', 'like', 'follow', 'idle'];
 
-function parseJsonObject<T>(raw: string): T {
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    const firstBrace = raw.indexOf('{');
-    const lastBrace = raw.lastIndexOf('}');
-    if (firstBrace >= 0 && lastBrace > firstBrace) {
-      return JSON.parse(raw.slice(firstBrace, lastBrace + 1)) as T;
-    }
-    throw new Error('Invalid JSON response');
+type ChatMessage = { role: 'system' | 'user'; content: string };
+
+async function requestJsonContent(params: {
+  model: string;
+  messages: ChatMessage[];
+  max_tokens: number;
+  temperature: number;
+  jsonSchema: typeof SINGLE_RESPONSE_JSON_SCHEMA | typeof BATCH_RESPONSE_JSON_SCHEMA;
+}): Promise<string> {
+  const structured = await lmClient.chat.completions.create({
+    model: params.model,
+    messages: params.messages,
+    max_tokens: params.max_tokens,
+    temperature: params.temperature,
+    response_format: {
+      type: 'json_schema',
+      json_schema: params.jsonSchema,
+    },
+  });
+
+  const structuredRaw = structured.choices[0]?.message?.content?.trim() || '';
+  if (structuredRaw.length > 0) {
+    return structuredRaw;
   }
+
+  console.warn(`[LM] Empty structured output from model=${params.model}; retrying with text response format`);
+
+  const text = await lmClient.chat.completions.create({
+    model: params.model,
+    messages: params.messages,
+    max_tokens: params.max_tokens,
+    temperature: params.temperature,
+    response_format: {
+      type: 'text',
+    },
+  });
+
+  const textRaw = text.choices[0]?.message?.content?.trim() || '';
+  if (textRaw.length > 0) {
+    return textRaw;
+  }
+
+  throw new Error('Empty model response');
+}
+
+function parseJsonObject<T>(raw: string): T {
+  const input = raw.trim();
+
+  const attempts: string[] = [];
+
+  const withoutFence = input
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  if (withoutFence) attempts.push(withoutFence);
+
+  if (input) attempts.push(input);
+
+  const firstBrace = withoutFence.indexOf('{');
+  const lastBrace = withoutFence.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    attempts.push(withoutFence.slice(firstBrace, lastBrace + 1));
+  }
+
+  const firstBracket = withoutFence.indexOf('[');
+  const lastBracket = withoutFence.lastIndexOf(']');
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    attempts.push(withoutFence.slice(firstBracket, lastBracket + 1));
+  }
+
+  const uniqueAttempts = [...new Set(attempts)];
+  for (const candidate of uniqueAttempts) {
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      const noTrailingCommas = candidate.replace(/,\s*([}\]])/g, '$1');
+      if (noTrailingCommas !== candidate) {
+        try {
+          return JSON.parse(noTrailingCommas) as T;
+        } catch {
+          // Continue to next strategy
+        }
+      }
+
+      const normalizedLikeJson = candidate
+        .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)/g, '$1"$2"$3')
+        .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_, group: string) => `"${group.replace(/"/g, '\\"')}"`);
+      if (normalizedLikeJson !== candidate) {
+        try {
+          return JSON.parse(normalizedLikeJson) as T;
+        } catch {
+          // Continue to next strategy
+        }
+      }
+    }
+  }
+
+  const preview = withoutFence.slice(0, 220).replace(/\s+/g, ' ');
+  throw new Error(`Invalid JSON response: ${preview || 'empty'}`);
 }
 
 function talkingStyleGuide(talkingStyle?: string | null): string {
@@ -104,6 +246,134 @@ function normalizeBotIndex(value: unknown): number | null {
   if (typeof value === 'number' && Number.isInteger(value)) return value;
   if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number.parseInt(value.trim(), 10);
   return null;
+}
+
+function extractBatchedDecisionArray(parsed: unknown): BatchedDecisionOutput[] {
+  if (Array.isArray(parsed)) {
+    return parsed as BatchedDecisionOutput[];
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return [];
+  }
+
+  const maybeSingle = parsed as Record<string, unknown>;
+  const maybeSingleAction = typeof maybeSingle.action === 'string'
+    ? maybeSingle.action
+    : typeof maybeSingle.decision === 'string'
+      ? maybeSingle.decision
+      : null;
+
+  if (maybeSingleAction && VALID_ACTIONS.includes(maybeSingleAction as BotAction)) {
+    return [{
+      botIndex: 0,
+      action: maybeSingleAction as BotAction,
+      targetId: typeof maybeSingle.targetId === 'string' ? maybeSingle.targetId : undefined,
+    }];
+  }
+
+  const obj = parsed as {
+    decisions?: unknown;
+    data?: { decisions?: unknown };
+    output?: { decisions?: unknown };
+    result?: { decisions?: unknown };
+  };
+
+  if (Array.isArray(obj.decisions)) {
+    return obj.decisions as BatchedDecisionOutput[];
+  }
+
+  if (Array.isArray(obj.data?.decisions)) {
+    return obj.data.decisions as BatchedDecisionOutput[];
+  }
+
+  if (Array.isArray(obj.output?.decisions)) {
+    return obj.output.decisions as BatchedDecisionOutput[];
+  }
+
+  if (Array.isArray(obj.result?.decisions)) {
+    return obj.result.decisions as BatchedDecisionOutput[];
+  }
+
+  return [];
+}
+
+function normalizeBatchDecisionItem(input: BatchedDecisionOutput | null | undefined): BatchedDecisionOutput {
+  const action = typeof input?.action === 'string'
+    ? input.action
+    : typeof input?.decision === 'string'
+      ? input.decision
+      : undefined;
+
+  const botIndex = input?.botIndex ?? input?.index ?? input?.bot_index;
+  const targetId = typeof input?.targetId === 'string' ? input.targetId : undefined;
+
+  return {
+    botIndex,
+    action: action as BotAction | undefined,
+    targetId,
+  };
+}
+
+function extractContentFromRawText(raw: string, fallbackMood = 'neutral'): ContentOutput | null {
+  const collapsed = raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!collapsed || collapsed.length > adminConfig.content.maxLength) {
+    return null;
+  }
+
+  const contentFieldMatch = collapsed.match(/(?:^|[,{\s])["']?content["']?\s*[:=]\s*([\s\S]+?)(?:(?:[,\n]\s*["']?(?:hashtags|emotional[_\s-]?state|action|mode|targetId)["']?\s*[:=])|$)/i);
+  const emotionalFieldMatch = collapsed.match(/["']?emotional[_\s-]?state["']?\s*[:=]\s*["']?([^"'\n,}{]+)["']?/i);
+  const hashtagFieldMatch = collapsed.match(/["']?hashtags["']?\s*[:=]\s*\[([^\]]*)\]/i);
+
+  const contentCandidate = contentFieldMatch?.[1] ?? collapsed;
+  const content = contentCandidate
+    .replace(/^content\s*:\s*/i, '')
+    .replace(/^"|"$/g, '')
+    .replace(/\s*[}\]]\s*$/g, '')
+    .trim();
+
+  if (!content || content.length > adminConfig.content.maxLength) {
+    return null;
+  }
+
+  const listTags = (hashtagFieldMatch?.[1] ?? '')
+    .split(',')
+    .map(tag => tag.replace(/["'\s]/g, ''))
+    .filter(tag => tag.length > 0)
+    .map(tag => (tag.startsWith('#') ? tag : `#${tag}`));
+
+  const inlineTags = content.match(/#[a-z0-9_]+/gi) ?? [];
+  const hashtags = [...new Set([...listTags, ...inlineTags])].slice(0, 3);
+
+  const emotionalState = emotionalFieldMatch?.[1]?.trim() || fallbackMood;
+
+  return {
+    content,
+    hashtags,
+    emotional_state: emotionalState,
+  };
+}
+
+function maybeUnwrapEmbeddedContent(content: string, fallbackMood: string): ContentOutput | null {
+  const candidate = content.trim();
+  if (!candidate.startsWith('{') || !/"?content"?\s*:/.test(candidate)) {
+    return null;
+  }
+
+  try {
+    const parsed = parseJsonObject<Partial<ContentOutput>>(candidate);
+    const normalized = normalizeContent(parsed);
+    if (normalized) return normalized;
+  } catch {
+    // continue to text rescue
+  }
+
+  return extractContentFromRawText(candidate, fallbackMood);
 }
 
 function appendFallbackDebug(emotionalState: string, debug?: FallbackDebug): string {
@@ -157,6 +427,11 @@ function normalizeContent(input: Partial<ContentOutput> | null | undefined): Con
   const emotionalState = typeof input?.emotional_state === 'string'
     ? input.emotional_state.trim()
     : '';
+
+  const unwrapped = maybeUnwrapEmbeddedContent(content, emotionalState || 'neutral');
+  if (unwrapped) {
+    return unwrapped;
+  }
 
   if (!content || !emotionalState || content.length > adminConfig.content.maxLength) {
     return null;
@@ -229,7 +504,7 @@ Output JSON must use exactly this object shape: ${UNIFIED_JSON_SCHEMA}
 Decision example:
 {"mode":"decision","action":"reply","targetId":"post_123","content":"actual reply text","hashtags":[],"emotional_state":"curious"}`;
 
-    const response = await lmClient.chat.completions.create({
+    const raw = await requestJsonContent({
       model: DECISION_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
@@ -237,10 +512,9 @@ Decision example:
       ],
       max_tokens: adminConfig.ai.decision.maxTokens,
       temperature: adminConfig.ai.decision.temperature,
-      response_format: { type: 'json_object' },
+      jsonSchema: SINGLE_RESPONSE_JSON_SCHEMA,
     });
 
-    const raw = response.choices[0]?.message?.content?.trim() || '{"action":"idle"}';
     const parsed = parseJsonObject<Partial<BotDecision & { content: string; hashtags: string[]; emotional_state: string }>>(raw);
     return normalizeDecision(parsed);
   } catch (error) {
@@ -288,7 +562,7 @@ ${compactProfiles}
 Return one decision per botIndex in ascending order. Output JSON only.`;
 
   try {
-    const response = await lmClient.chat.completions.create({
+    const raw = await requestJsonContent({
       model: DECISION_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
@@ -296,12 +570,11 @@ Return one decision per botIndex in ascending order. Output JSON only.`;
       ],
       max_tokens: Math.max(adminConfig.ai.decision.maxTokens * 2, bots.length * 70),
       temperature: adminConfig.ai.decision.temperature,
-      response_format: { type: 'json_object' },
+      jsonSchema: BATCH_RESPONSE_JSON_SCHEMA,
     });
 
-    const raw = response.choices[0]?.message?.content?.trim() || '{"decisions":[]}';
-    const parsed = parseJsonObject<{ decisions?: BatchedDecisionOutput[] }>(raw);
-    const outputs = Array.isArray(parsed.decisions) ? parsed.decisions : [];
+    const parsed = parseJsonObject<unknown>(raw);
+    const outputs = extractBatchedDecisionArray(parsed).map(normalizeBatchDecisionItem);
 
     const indexedOutputs = outputs
       .map(item => ({
@@ -319,6 +592,13 @@ Return one decision per botIndex in ascending order. Output JSON only.`;
     const decisions = bots.map((bot, botIndex) => {
       const match = indexedOutputs.find(entry => entry.normalizedIndex === botIndex)?.item;
       if (!match) {
+        const positional = outputs[botIndex];
+        if (positional) {
+          const normalizedPositional = normalizeDecision(positional);
+          if (normalizedPositional.action !== 'idle' || positional.action === 'idle' || positional.decision === 'idle') {
+            return normalizedPositional;
+          }
+        }
         console.warn(`[LM] Batch decision miss for botIndex=${botIndex}; using fallback decision`);
         return getFallbackDecision(bot.extraversion, bot.reactivity);
       }
@@ -393,7 +673,7 @@ Example: {"mode":"content","action":"idle","targetId":"","content":"actual post 
 
     for (const temperature of temperatures) {
       try {
-        const response = await lmClient.chat.completions.create({
+        const raw = await requestJsonContent({
           model: modelOverride || CONTENT_MODEL,
           messages: [
             { role: 'system', content: systemPrompt },
@@ -401,15 +681,30 @@ Example: {"mode":"content","action":"idle","targetId":"","content":"actual post 
           ],
           max_tokens: adminConfig.ai.content.maxTokens,
           temperature,
-          response_format: { type: 'json_object' },
+          jsonSchema: SINGLE_RESPONSE_JSON_SCHEMA,
         });
 
-        const raw = response.choices[0]?.message?.content?.trim() || '';
-        const parsed = parseJsonObject<Partial<ContentOutput>>(raw);
+        let parsed: Partial<ContentOutput>;
+        try {
+          parsed = parseJsonObject<Partial<ContentOutput>>(raw);
+        } catch (error) {
+          const rescued = extractContentFromRawText(raw, botDna.emotionalState || 'neutral');
+          if (rescued && !isLowQualityGeneratedText(rescued.content, context)) {
+            return rescued;
+          }
+          throw error;
+        }
+
         const normalized = normalizeContent(parsed);
         if (normalized && !isLowQualityGeneratedText(normalized.content, context)) {
           return normalized;
         }
+
+        const rescued = extractContentFromRawText(raw, botDna.emotionalState || 'neutral');
+        if (rescued && !isLowQualityGeneratedText(rescued.content, context)) {
+          return rescued;
+        }
+
         qualityFailures++;
       } catch (error) {
         console.warn(

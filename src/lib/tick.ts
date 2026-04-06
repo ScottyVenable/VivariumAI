@@ -306,6 +306,68 @@ export interface TickResult {
   timestamp: Date;
 }
 
+type TickLastResult = 'idle' | 'success' | 'error';
+
+type TickRuntimeState = {
+  inProgressCount: number;
+  lastResult: TickLastResult;
+  lastUpdatedAt: number | null;
+  lastError: string | null;
+};
+
+const tickRuntimeByTimeline = new Map<string, TickRuntimeState>();
+
+function ensureTickRuntimeState(timelineId: string): TickRuntimeState {
+  const existing = tickRuntimeByTimeline.get(timelineId);
+  if (existing) {
+    return existing;
+  }
+
+  const created: TickRuntimeState = {
+    inProgressCount: 0,
+    lastResult: 'idle',
+    lastUpdatedAt: null,
+    lastError: null,
+  };
+  tickRuntimeByTimeline.set(timelineId, created);
+  return created;
+}
+
+export async function runTickWithStatus(timelineId: string): Promise<TickResult> {
+  const state = ensureTickRuntimeState(timelineId);
+  state.inProgressCount += 1;
+
+  try {
+    const result = await runTick(timelineId);
+    state.lastResult = 'success';
+    state.lastUpdatedAt = Date.now();
+    state.lastError = null;
+    return result;
+  } catch (error) {
+    state.lastResult = 'error';
+    state.lastUpdatedAt = Date.now();
+    state.lastError = error instanceof Error ? error.message : 'Tick failed';
+    throw error;
+  } finally {
+    state.inProgressCount = Math.max(0, state.inProgressCount - 1);
+  }
+}
+
+export function getTickRuntimeStatus(timelineId: string): {
+  inProgress: boolean;
+  lastResult: TickLastResult;
+  lastUpdatedAt: string | null;
+  lastError: string | null;
+} {
+  const state = ensureTickRuntimeState(timelineId);
+  return {
+    inProgress: state.inProgressCount > 0,
+    lastResult: state.lastResult,
+    lastUpdatedAt: state.lastUpdatedAt ? new Date(state.lastUpdatedAt).toISOString() : null,
+    lastError: state.lastError,
+  };
+}
+
 export async function runTick(timelineId: string): Promise<TickResult> {
   const tickId = `tick_${Date.now()}`;
   const actions: TickResult['actions'] = [];
@@ -752,7 +814,7 @@ export function startTickLoop(timelineId: string): void {
       if (loopGeneration !== currentLoopGeneration || !activeTimelineId) return;
 
       try {
-        await runTick(activeTimelineId);
+        await runTickWithStatus(activeTimelineId);
         console.log(`[TICK] Completed tick for timeline ${activeTimelineId}`);
       } catch (err) {
         console.error('[TICK] Error during tick:', err);

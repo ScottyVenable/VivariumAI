@@ -6,6 +6,7 @@ import { Heart, MessageCircle, Share2 } from 'lucide-react';
 import { Avatar } from '@/components/ui/avatar';
 import { TierBadge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { adminConfig } from '@config/admin';
 
 export type PostDebugInfo = {
   mood: string;
@@ -13,6 +14,7 @@ export type PostDebugInfo = {
   parseFailures?: number;
   qualityFailures?: number;
   reason?: string;
+  rawEmotionalState?: string;
 };
 
 export interface PostAuthor {
@@ -66,7 +68,7 @@ export function parsePostDebugInfo(emotionalState?: string | null): PostDebugInf
   const mood = (moodRaw || '').trim();
 
   if (!debugRaw) {
-    return { mood };
+    return { mood, source: 'model', rawEmotionalState: emotionalState };
   }
 
   const entries = debugRaw
@@ -84,11 +86,37 @@ export function parsePostDebugInfo(emotionalState?: string | null): PostDebugInf
 
   return {
     mood,
-    source: lookup('source') || undefined,
+    source: lookup('source') || 'model',
     parseFailures: parseFailuresRaw && /^\d+$/.test(parseFailuresRaw) ? Number.parseInt(parseFailuresRaw, 10) : undefined,
     qualityFailures: qualityFailuresRaw && /^\d+$/.test(qualityFailuresRaw) ? Number.parseInt(qualityFailuresRaw, 10) : undefined,
     reason: lookup('reason') || undefined,
+    rawEmotionalState: emotionalState,
   };
+}
+
+async function copyText(value: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(value);
+    return;
+  } catch {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.top = '-1000px';
+      textarea.style.left = '-1000px';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (copied) return;
+    } catch {
+      // ignore and fall through to warning
+    }
+    console.warn('[Debug] Clipboard write failed (clipboard api + fallback)');
+  }
 }
 
 export function PostCard({
@@ -206,15 +234,79 @@ export function PostCard({
 
           {isDev && debugTooltip && debugInfo && (
             <div
-              className="fixed z-[999] rounded-lg border border-zinc-700 bg-zinc-950/95 px-3 py-2 text-xs text-zinc-200 shadow-2xl"
+              className="fixed z-[999] w-[320px] rounded-lg border border-zinc-700 bg-zinc-950/95 px-3 py-2 text-xs text-zinc-200 shadow-2xl"
               style={{ left: debugTooltip.x + 8, top: debugTooltip.y + 8 }}
+              onClick={event => event.stopPropagation()}
             >
               <div className="font-semibold text-white">Post Debug</div>
               <div>Mood: {debugInfo.mood || 'unknown'}</div>
-              <div>Source: {debugInfo.source || 'model/unknown'}</div>
+              <div>Source: {debugInfo.source || 'model'}</div>
+              <div>Post ID: {post.id}</div>
+              <div>Author: @{post.author.username}</div>
+              <div>Length: {post.content.length} chars</div>
+              <div>Decision model: {adminConfig.ai.models.decision}</div>
+              <div>Content model: {adminConfig.ai.models.content}</div>
               {typeof debugInfo.parseFailures === 'number' && <div>Parse failures: {debugInfo.parseFailures}</div>}
               {typeof debugInfo.qualityFailures === 'number' && <div>Quality failures: {debugInfo.qualityFailures}</div>}
               {debugInfo.reason && <div>Reason: {debugInfo.reason}</div>}
+              {debugInfo.rawEmotionalState && <div className="truncate">Raw state: {debugInfo.rawEmotionalState}</div>}
+              <div className="mt-2 grid grid-cols-2 gap-1">
+                <button
+                  className="rounded border border-zinc-700 px-2 py-1 text-left text-[11px] text-zinc-200 hover:bg-zinc-800"
+                  onClick={async event => {
+                    event.stopPropagation();
+                    await copyText(post.id);
+                  }}
+                >
+                  Copy Post ID
+                </button>
+                <button
+                  className="rounded border border-zinc-700 px-2 py-1 text-left text-[11px] text-zinc-200 hover:bg-zinc-800"
+                  onClick={async event => {
+                    event.stopPropagation();
+                    await copyText(
+                      JSON.stringify(
+                        {
+                          postId: post.id,
+                          author: post.author.username,
+                          source: debugInfo.source,
+                          mood: debugInfo.mood,
+                          parseFailures: debugInfo.parseFailures,
+                          qualityFailures: debugInfo.qualityFailures,
+                          reason: debugInfo.reason,
+                          emotionalState: debugInfo.rawEmotionalState,
+                          models: {
+                            decision: adminConfig.ai.models.decision,
+                            content: adminConfig.ai.models.content,
+                          },
+                        },
+                        null,
+                        2
+                      )
+                    );
+                  }}
+                >
+                  Copy Debug JSON
+                </button>
+                <button
+                  className="rounded border border-zinc-700 px-2 py-1 text-left text-[11px] text-zinc-200 hover:bg-zinc-800"
+                  onClick={event => {
+                    event.stopPropagation();
+                    onOpenProfile?.(post.author.id);
+                  }}
+                >
+                  Open Author
+                </button>
+                <button
+                  className="rounded border border-zinc-700 px-2 py-1 text-left text-[11px] text-zinc-200 hover:bg-zinc-800"
+                  onClick={event => {
+                    event.stopPropagation();
+                    onOpen?.(post.id);
+                  }}
+                >
+                  Open Thread
+                </button>
+              </div>
               <div className="mt-1 text-[10px] text-zinc-500">(Dev only, right-click post)</div>
             </div>
           )}

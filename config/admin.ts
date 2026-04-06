@@ -21,11 +21,11 @@ export const adminConfig = {
 
   simulation: {
     tick: {
-      minIntervalMs: 15_000,
-      maxIntervalMs: 60_000,
+      minIntervalMs: 20000,
+      maxIntervalMs: 60000,
       botsPerTickRatio: 0.3,
       decisionBatchSize: 6,
-      recentPostsToLoad: 20,
+      recentPostsToLoad: 15,
       hotPostsToTrack: 5,
       recentPostsInPrompt: 8,
       memoryPrompt: {
