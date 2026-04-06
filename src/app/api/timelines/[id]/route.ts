@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { getActiveTimelineId, stopTickLoop } from '@/lib/tick';
 
 export async function GET(
   _req: NextRequest,
@@ -40,6 +41,46 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  await prisma.timeline.delete({ where: { id } });
-  return NextResponse.json({ success: true });
+  try {
+    if (getActiveTimelineId() === id) {
+      stopTickLoop();
+    }
+
+    const existing = await prisma.timeline.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return NextResponse.json({ error: 'Timeline not found' }, { status: 404 });
+    }
+
+    await prisma.$transaction(async tx => {
+      await tx.like.deleteMany({
+        where: {
+          OR: [
+            { post: { timelineId: id } },
+            { bot: { timelineId: id } },
+          ],
+        },
+      });
+
+      await tx.follow.deleteMany({
+        where: {
+          OR: [
+            { source: { timelineId: id } },
+            { target: { timelineId: id } },
+          ],
+        },
+      });
+
+      await tx.post.deleteMany({ where: { timelineId: id } });
+      await tx.bot.deleteMany({ where: { timelineId: id } });
+      await tx.timeline.delete({ where: { id } });
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to delete timeline' }, { status: 500 });
+  }
 }

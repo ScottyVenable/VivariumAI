@@ -11,10 +11,60 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  margin: 0;
+  min-width: 320px;
+  -webkit-tap-highlight-color: transparent;
+  text-rendering: optimizeLegibility;
 }
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
+  color-scheme: dark;
+  height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  min-height: 100%;
+  overflow-x: hidden;
+}
+
+*:not(input):not(textarea):not([contenteditable='true']) {
+  caret-color: transparent;
+}
+
+input,
+textarea,
+[contenteditable='true'] {
+  caret-color: auto;
+}
+
+main,
+aside,
+section,
+div {
+  overscroll-behavior: contain;
+}
+
+* {
+  -webkit-overflow-scrolling: touch;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a,
+button {
+  touch-action: manipulation;
+  user-select: none;
 }
 
 ::-webkit-scrollbar {

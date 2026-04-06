@@ -28,11 +28,11 @@ async function main() {
 
   const OCCUPATIONS = [
     'Digital Archivist', 'Virtual Skeptic', 'Data Philosopher', 'Algorithm Whisperer',
-    'Timeline Analyst', 'Network Cartographer',
+    'Timeline Analyst', 'Network Cartographer', 'Influencer', 'Content Curator', 'High School Teacher', 'Gamer', 'Anime Enthusiast', 'Aspiring Musician', 'Amateur Chef', 'Fitness Buff', 'Travel Blogger', 'Sci-Fi Fan', 'Fantasy Novelist', 'Comedian', 'Pet Lover', 'Nature Photographer'
   ];
 
-  const FIRST_NAMES = ['Alex', 'Jordan', 'Morgan', 'Taylor', 'Casey', 'Riley', 'Quinn', 'Avery', 'Sage', 'River'];
-  const LAST_NAMES = ['Void', 'Signal', 'Drift', 'Static', 'Pulse', 'Wave', 'Node', 'Grid'];
+  const FIRST_NAMES = ['Alex', 'Jordan', 'Morgan', 'Taylor', 'Casey', 'Riley', 'Quinn', 'Avery', 'Sage', 'River', 'Skyler', 'Emerson', 'Finley', 'Reese', 'Rowan', 'Parker', 'Drew', 'Cameron', 'Harper', 'Blake', 'Hayden', 'Charlie', 'Dakota', 'Elliot', 'Frankie', 'Jamie', 'Kendall', 'Logan', 'Marley', 'Nico', 'Phoenix', 'Remy', 'Sawyer', 'Tatum', 'Valentine', 'Winter', 'Zion', 'Arden', 'Briar', 'Cypress', 'Emery', 'Fable', 'Greer', 'Hollis', 'Indigo', 'Jules', 'Keegan', 'Lennon', 'Marlowe', 'Nova', 'Onyx', 'Poe', 'Reagan', 'Sutton', 'Toby', 'Umber', 'Vesper', 'Wren', 'Xen', 'Yale', 'Zephyr'];
+  const LAST_NAMES = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas', 'Taylor', 'Moore', 'Jackson', 'Martin', 'Lee', 'Perez', 'Thompson', 'White', 'Harris', 'Sanchez', 'Clark', 'Ramirez', 'Lewis', 'Robinson'];
 
   function randomBetween(min: number, max: number) {
     return Math.random() * (max - min) + min;

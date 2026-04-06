@@ -23,6 +23,7 @@ model Bot {
   username       String   @unique
   displayName    String
   bio            String?
+  memory         String   @default("{}")
   avatarUrl      String?
   tier           String   @default("SIMPLE_USER")
   isHuman        Boolean  @default(false)

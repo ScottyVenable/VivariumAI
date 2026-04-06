@@ -46,7 +46,7 @@ export const TIER_CONFIG: Record<BotTier, TierConfig> = {
   },
   SUPER_USER_HUMAN: {
     label: 'Architect',
-    badge: '⚡',
+    badge: 'A',
     badgeColor: 'text-purple-400',
     description: 'System administrator. God Mode access.',
   },

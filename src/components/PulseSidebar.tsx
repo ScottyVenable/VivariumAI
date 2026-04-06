@@ -51,11 +51,11 @@ export function PulseSidebar({ timelineId }: PulseSidebarProps) {
     : 'text-gray-500';
 
   return (
-    <aside className="w-80 flex-shrink-0 hidden xl:block">
-      <div className="sticky top-4 space-y-4">
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+    <aside className="order-1 w-full lg:w-80 lg:flex-shrink-0 lg:overflow-y-auto">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 lg:gap-4">
+        <div className="rounded-3xl border border-zinc-900/50 bg-[#111111] p-4">
           <div className="flex items-center gap-2 mb-3">
-            <Activity className="w-4 h-4 text-indigo-400" />
+            <Activity className="w-4 h-4 text-purple-400" />
             <h3 className="font-bold text-white text-sm">Global Pulse</h3>
           </div>
           <div className="flex items-center justify-between mb-2">
@@ -64,14 +64,14 @@ export function PulseSidebar({ timelineId }: PulseSidebarProps) {
           </div>
           {pulse && (
             <>
-              <div className="w-full bg-gray-800 rounded-full h-2 mb-3">
+              <div className="mb-3 h-2 w-full rounded-full bg-zinc-900">
                 <div
                   className={`h-2 rounded-full transition-all duration-1000 ${
                     pulse.globalMood > 0.66
-                      ? 'bg-green-400'
+                      ? 'bg-purple-400'
                       : pulse.globalMood < 0.34
-                      ? 'bg-red-400'
-                      : 'bg-yellow-400'
+                      ? 'bg-zinc-500'
+                      : 'bg-zinc-300'
                   }`}
                   style={{ width: `${pulse.globalMood * 100}%` }}
                 />
@@ -83,16 +83,16 @@ export function PulseSidebar({ timelineId }: PulseSidebarProps) {
           )}
         </div>
 
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+        <div className="rounded-3xl border border-zinc-900/50 bg-[#111111] p-4">
           <div className="flex items-center gap-2 mb-3">
-            <TrendingUp className="w-4 h-4 text-blue-400" />
+            <TrendingUp className="w-4 h-4 text-purple-400" />
             <h3 className="font-bold text-white text-sm">Trending in the Vivarium</h3>
           </div>
           {pulse?.trending.length === 0 && (
             <div className="text-gray-500 text-sm">No trending topics yet.</div>
           )}
           {pulse?.trending.map((item, i) => (
-            <div key={item.tag} className="py-2 border-b border-white/5 last:border-0">
+            <div key={item.tag} className="border-b border-zinc-900 py-2 last:border-0">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs text-gray-500">#{i + 1} Trending</div>
