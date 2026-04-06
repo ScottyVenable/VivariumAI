@@ -1,5 +1,6 @@
 import { prisma } from './db';
 import { claimAvatar } from './avatars';
+import { stringifyBotMemory } from './memory';
 
 const OCCUPATIONS = [
   'Digital Archivist', 'Virtual Skeptic', 'Data Philosopher', 'Algorithm Whisperer',
@@ -67,6 +68,11 @@ export async function generateBots(options: BotGenerationOptions): Promise<strin
         avatarUrl,
         tier,
         bio: generateBio(occupation, simulatedAge, compassion),
+        memory: stringifyBotMemory({
+          topics: [occupation, compassion > 0.6 ? 'community' : 'discourse'],
+          people: [],
+          recent: [`Joined the timeline as ${displayName}`],
+        }),
         isHuman: false,
         influenceability: randomBetween(0.1, 0.9),
         reactivity: randomBetween(0.1, 0.9),
@@ -78,7 +84,7 @@ export async function generateBots(options: BotGenerationOptions): Promise<strin
         occupation,
         netWorth: randomBetween(500, 10000),
         timelineId,
-      },
+      } as any,
     });
 
     createdIds.push(bot.id);
