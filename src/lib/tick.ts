@@ -666,6 +666,11 @@ async function executeAction(
 
 let tickInterval: ReturnType<typeof setTimeout> | null = null;
 let activeTimelineId: string | null = null;
+// Monotonically increasing generation counter. Each startTickLoop() call
+// bumps this; stopTickLoop() also bumps it. Any in-flight async callback
+// that sees a stale generation aborts before re-scheduling, eliminating
+// orphaned timers and duplicate loops after a stop/switch mid-tick.
+let currentLoopGeneration = 0;
 
 export function isTickLoopRunning(): boolean {
   return tickInterval !== null;
@@ -676,6 +681,10 @@ export function getActiveTimelineId(): string | null {
 }
 
 export function startTickLoop(timelineId: string): void {
+  // Invalidate any currently in-flight tick callback.
+  currentLoopGeneration++;
+  const loopGeneration = currentLoopGeneration;
+
   if (tickInterval) {
     clearTimeout(tickInterval);
   }
@@ -685,15 +694,21 @@ export function startTickLoop(timelineId: string): void {
     const nextInterval = getRandomTickIntervalMs();
 
     tickInterval = setTimeout(async () => {
-      if (activeTimelineId) {
-        try {
-          await runTick(activeTimelineId);
-          console.log(`[TICK] Completed tick for timeline ${activeTimelineId}`);
-        } catch (err) {
-          console.error('[TICK] Error during tick:', err);
-        }
-        scheduleNextTick();
+      // Guard: bail out if stop() or a new start() was called while we waited.
+      if (loopGeneration !== currentLoopGeneration || !activeTimelineId) return;
+
+      try {
+        await runTick(activeTimelineId);
+        console.log(`[TICK] Completed tick for timeline ${activeTimelineId}`);
+      } catch (err) {
+        console.error('[TICK] Error during tick:', err);
       }
+
+      // Guard again after the async work: stop/switch could have happened
+      // during the await, so re-check before scheduling the next interval.
+      if (loopGeneration !== currentLoopGeneration || !activeTimelineId) return;
+
+      scheduleNextTick();
     }, nextInterval);
   };
 
@@ -705,6 +720,9 @@ export function startTickLoop(timelineId: string): void {
 }
 
 export function stopTickLoop(): void {
+  // Bump the generation so any in-flight tick callback self-aborts after its
+  // current await resolves, even if clearTimeout already fired too late.
+  currentLoopGeneration++;
   if (tickInterval) {
     clearTimeout(tickInterval);
     tickInterval = null;
