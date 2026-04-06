@@ -70,9 +70,10 @@ async function main() {
         humanSentiment: randomBetween(0.1, 0.9),
         simulatedAge,
         occupation,
+        talkingStyle,
         netWorth: randomBetween(500, 10000),
         timelineId: timeline.id,
-      },
+      } as any,
     });
   }
 

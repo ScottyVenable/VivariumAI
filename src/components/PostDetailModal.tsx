@@ -5,7 +5,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { ArrowLeft, Heart, MessageCircle, Send, Share2, X } from 'lucide-react';
 import { Avatar } from '@/components/ui/avatar';
 import { TierBadge } from '@/components/ui/badge';
-import { renderMentions, type Post } from '@/components/PostCard';
+import { parsePostDebugInfo, renderMentions, type Post } from '@/components/PostCard';
 import { cn } from '@/lib/utils';
 import { adminConfig } from '@config/admin';
 
@@ -66,10 +66,25 @@ function ReplyThread({
 }) {
   const liked = likedPostIds.has(reply.id);
   const timeAgo = formatDistanceToNow(new Date(reply.createdAt), { addSuffix: true });
+  const isDev = process.env.NODE_ENV !== 'production';
+  const debugInfo = parsePostDebugInfo(reply.emotionalState);
+  const [debugTooltip, setDebugTooltip] = useState<{ x: number; y: number } | null>(null);
+  const moodLabel = debugInfo?.mood || reply.emotionalState || null;
 
   return (
     <div className="relative">
-      <div className="border-b border-zinc-900 bg-black px-4 py-3 transition-colors hover:bg-zinc-950">
+      <div
+        className="border-b border-zinc-900 bg-black px-4 py-3 transition-colors hover:bg-zinc-950"
+        onContextMenu={event => {
+          if (!isDev || !debugInfo) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setDebugTooltip({ x: event.clientX, y: event.clientY });
+        }}
+        onMouseLeave={() => {
+          if (debugTooltip) setDebugTooltip(null);
+        }}
+      >
         <div className="flex gap-3">
           <div className="relative flex flex-col items-center">
             <button onClick={() => onOpenProfile?.(reply.author.id)} className="rounded-full">
@@ -94,6 +109,12 @@ function ReplyThread({
             <p className="mb-2 whitespace-pre-wrap break-words text-[14px] leading-snug text-zinc-100">
               {renderMentions(reply.content)}
             </p>
+
+            {moodLabel && (
+              <div className="mb-2 inline-flex rounded-full border border-zinc-800 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-500">
+                mood: {moodLabel}
+              </div>
+            )}
 
             {reply.hashtags.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1">
@@ -131,6 +152,21 @@ function ReplyThread({
 
               <span className="text-zinc-600">↳ @{postAuthorUsername}</span>
             </div>
+
+            {isDev && debugTooltip && debugInfo && (
+              <div
+                className="fixed z-[999] rounded-lg border border-zinc-700 bg-zinc-950/95 px-3 py-2 text-xs text-zinc-200 shadow-2xl"
+                style={{ left: debugTooltip.x + 8, top: debugTooltip.y + 8 }}
+              >
+                <div className="font-semibold text-white">Reply Debug</div>
+                <div>Mood: {debugInfo.mood || 'unknown'}</div>
+                <div>Source: {debugInfo.source || 'model/unknown'}</div>
+                {typeof debugInfo.parseFailures === 'number' && <div>Parse failures: {debugInfo.parseFailures}</div>}
+                {typeof debugInfo.qualityFailures === 'number' && <div>Quality failures: {debugInfo.qualityFailures}</div>}
+                {debugInfo.reason && <div>Reason: {debugInfo.reason}</div>}
+                <div className="mt-1 text-[10px] text-zinc-500">(Dev only, right-click reply)</div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -172,8 +208,10 @@ export function PostDetailModal({
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
   const [replyingToLabel, setReplyingToLabel] = useState<string | null>(null);
   const [replyError, setReplyError] = useState<string | null>(null);
+  const [debugTooltip, setDebugTooltip] = useState<{ x: number; y: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const isDev = process.env.NODE_ENV !== 'production';
 
   const fetchPost = useCallback(async () => {
     try {
@@ -283,6 +321,8 @@ export function PostDetailModal({
   const timeAgo = post ? formatDistanceToNow(new Date(post.createdAt), { addSuffix: true }) : '';
   const totalReplies = useMemo(() => countAllReplies(post?.replies ?? []), [post?.replies]);
   const characterCount = replyText.trim().length;
+  const postDebugInfo = parsePostDebugInfo(post?.emotionalState);
+  const postMoodLabel = postDebugInfo?.mood || post?.emotionalState || null;
 
   return (
     <div
@@ -319,7 +359,18 @@ export function PostDetailModal({
 
           {!loading && post && (
             <>
-              <div className="border-b border-zinc-900 px-4 pb-3 pt-4">
+              <div
+                className="border-b border-zinc-900 px-4 pb-3 pt-4"
+                onContextMenu={event => {
+                  if (!isDev || !postDebugInfo) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setDebugTooltip({ x: event.clientX, y: event.clientY });
+                }}
+                onMouseLeave={() => {
+                  if (debugTooltip) setDebugTooltip(null);
+                }}
+              >
                 <div className="mb-3 flex gap-3">
                   <button onClick={() => onOpenProfile?.(post.author.id)} className="rounded-full">
                     <Avatar src={post.author.avatarUrl} alt={post.author.displayName} size={44} />
@@ -337,6 +388,12 @@ export function PostDetailModal({
                 <p className="mb-3 whitespace-pre-wrap break-words text-[18px] leading-snug text-zinc-100">
                   {renderMentions(post.content)}
                 </p>
+
+                {postMoodLabel && (
+                  <div className="mb-3 inline-flex rounded-full border border-zinc-800 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-500">
+                    mood: {postMoodLabel}
+                  </div>
+                )}
 
                 {post.hashtags.length > 0 && (
                   <div className="mb-3 flex flex-wrap gap-1.5">
@@ -397,6 +454,21 @@ export function PostDetailModal({
                     </span>
                   </button>
                 </div>
+
+                {isDev && debugTooltip && postDebugInfo && (
+                  <div
+                    className="fixed z-[999] rounded-lg border border-zinc-700 bg-zinc-950/95 px-3 py-2 text-xs text-zinc-200 shadow-2xl"
+                    style={{ left: debugTooltip.x + 8, top: debugTooltip.y + 8 }}
+                  >
+                    <div className="font-semibold text-white">Post Debug</div>
+                    <div>Mood: {postDebugInfo.mood || 'unknown'}</div>
+                    <div>Source: {postDebugInfo.source || 'model/unknown'}</div>
+                    {typeof postDebugInfo.parseFailures === 'number' && <div>Parse failures: {postDebugInfo.parseFailures}</div>}
+                    {typeof postDebugInfo.qualityFailures === 'number' && <div>Quality failures: {postDebugInfo.qualityFailures}</div>}
+                    {postDebugInfo.reason && <div>Reason: {postDebugInfo.reason}</div>}
+                    <div className="mt-1 text-[10px] text-zinc-500">(Dev only, right-click post)</div>
+                  </div>
+                )}
               </div>
 
               {post.replies.length === 0 ? (

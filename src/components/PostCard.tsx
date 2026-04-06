@@ -1,10 +1,19 @@
 'use client';
 
+import { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { Heart, MessageCircle, Share2 } from 'lucide-react';
 import { Avatar } from '@/components/ui/avatar';
 import { TierBadge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+
+export type PostDebugInfo = {
+  mood: string;
+  source?: string;
+  parseFailures?: number;
+  qualityFailures?: number;
+  reason?: string;
+};
 
 export interface PostAuthor {
   id: string;
@@ -50,6 +59,38 @@ export function renderMentions(text: string) {
   );
 }
 
+export function parsePostDebugInfo(emotionalState?: string | null): PostDebugInfo | null {
+  if (!emotionalState || emotionalState.trim().length === 0) return null;
+
+  const [moodRaw, debugRaw] = emotionalState.split('||debug:');
+  const mood = (moodRaw || '').trim();
+
+  if (!debugRaw) {
+    return { mood };
+  }
+
+  const entries = debugRaw
+    .split(';')
+    .map(part => part.trim())
+    .filter(Boolean)
+    .map(part => {
+      const [key, ...valueParts] = part.split('=');
+      return { key: key?.trim(), value: valueParts.join('=').trim() };
+    });
+
+  const lookup = (key: string) => entries.find(entry => entry.key === key)?.value;
+  const parseFailuresRaw = lookup('parse');
+  const qualityFailuresRaw = lookup('quality');
+
+  return {
+    mood,
+    source: lookup('source') || undefined,
+    parseFailures: parseFailuresRaw && /^\d+$/.test(parseFailuresRaw) ? Number.parseInt(parseFailuresRaw, 10) : undefined,
+    qualityFailures: qualityFailuresRaw && /^\d+$/.test(qualityFailuresRaw) ? Number.parseInt(qualityFailuresRaw, 10) : undefined,
+    reason: lookup('reason') || undefined,
+  };
+}
+
 export function PostCard({
   post,
   liked = false,
@@ -61,10 +102,24 @@ export function PostCard({
   className,
 }: PostCardProps) {
   const timeAgo = formatDistanceToNow(new Date(post.createdAt), { addSuffix: true });
+  const isDev = process.env.NODE_ENV !== 'production';
+  const debugInfo = parsePostDebugInfo(post.emotionalState);
+  const [debugTooltip, setDebugTooltip] = useState<{ x: number; y: number } | null>(null);
+
+  const moodLabel = debugInfo?.mood || post.emotionalState || null;
 
   return (
     <article
       onClick={() => onOpen?.(post.id)}
+      onContextMenu={event => {
+        if (!isDev || !debugInfo) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setDebugTooltip({ x: event.clientX, y: event.clientY });
+      }}
+      onMouseLeave={() => {
+        if (debugTooltip) setDebugTooltip(null);
+      }}
       className={cn(
         'border-b border-zinc-900 bg-black px-4 py-3 transition-colors hover:bg-zinc-950 cursor-pointer select-none',
         isReply && 'bg-zinc-950',
@@ -143,9 +198,24 @@ export function PostCard({
           )}
 
           {/* Emotional state */}
-          {post.emotionalState && (
+          {moodLabel && (
             <div className="mb-2 inline-flex rounded-full border border-zinc-800 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-500">
-              mood: {post.emotionalState}
+              mood: {moodLabel}
+            </div>
+          )}
+
+          {isDev && debugTooltip && debugInfo && (
+            <div
+              className="fixed z-[999] rounded-lg border border-zinc-700 bg-zinc-950/95 px-3 py-2 text-xs text-zinc-200 shadow-2xl"
+              style={{ left: debugTooltip.x + 8, top: debugTooltip.y + 8 }}
+            >
+              <div className="font-semibold text-white">Post Debug</div>
+              <div>Mood: {debugInfo.mood || 'unknown'}</div>
+              <div>Source: {debugInfo.source || 'model/unknown'}</div>
+              {typeof debugInfo.parseFailures === 'number' && <div>Parse failures: {debugInfo.parseFailures}</div>}
+              {typeof debugInfo.qualityFailures === 'number' && <div>Quality failures: {debugInfo.qualityFailures}</div>}
+              {debugInfo.reason && <div>Reason: {debugInfo.reason}</div>}
+              <div className="mt-1 text-[10px] text-zinc-500">(Dev only, right-click post)</div>
             </div>
           )}
 

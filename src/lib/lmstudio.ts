@@ -47,6 +47,13 @@ type BatchedDecisionOutput = {
   targetId?: string;
 };
 
+type FallbackDebug = {
+  source: 'fallback';
+  parseFailures?: number;
+  qualityFailures?: number;
+  reason?: string;
+};
+
 const LOW_SIGNAL_PHRASES = adminConfig.ai.content.lowSignalPhrases;
 
 const MASTER_SYSTEM_PROMPT = `You are the simulation mind of a bot inside Vivarium, an autonomous social-media world. You write real social-media posts — not descriptions of posts. Stay fully in character based on the provided age, personality, and occupation. If structured output is requested, return only valid JSON matching the requested fields.`;
@@ -91,6 +98,23 @@ function talkingStyleGuide(talkingStyle?: string | null): string {
   const style = (talkingStyle || '').trim();
   if (!style) return 'Balanced social tone. Medium sentence length, clear but casual wording.';
   return style;
+}
+
+function normalizeBotIndex(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isInteger(value)) return value;
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number.parseInt(value.trim(), 10);
+  return null;
+}
+
+function appendFallbackDebug(emotionalState: string, debug?: FallbackDebug): string {
+  if (!debug) return emotionalState;
+  const parts = [
+    `source=${debug.source}`,
+    `parse=${debug.parseFailures ?? 0}`,
+    `quality=${debug.qualityFailures ?? 0}`,
+    `reason=${debug.reason ?? 'unknown'}`,
+  ];
+  return `${emotionalState}||debug:${parts.join(';')}`;
 }
 
 function getMemoryPrompt(raw?: string | null, compact = false): string {
@@ -219,7 +243,10 @@ Decision example:
     const raw = response.choices[0]?.message?.content?.trim() || '{"action":"idle"}';
     const parsed = parseJsonObject<Partial<BotDecision & { content: string; hashtags: string[]; emotional_state: string }>>(raw);
     return normalizeDecision(parsed);
-  } catch {
+  } catch (error) {
+    console.warn(
+      `[LM] decideBotAction fallback: model=${DECISION_MODEL}, reason=${error instanceof Error ? error.message : 'unknown'}`
+    );
     return getFallbackDecision(botDna.extraversion, botDna.reactivity);
   }
 }
@@ -276,16 +303,33 @@ Return one decision per botIndex in ascending order. Output JSON only.`;
     const parsed = parseJsonObject<{ decisions?: BatchedDecisionOutput[] }>(raw);
     const outputs = Array.isArray(parsed.decisions) ? parsed.decisions : [];
 
+    const indexedOutputs = outputs
+      .map(item => ({
+        normalizedIndex: normalizeBotIndex(item?.botIndex),
+        rawIndex: item?.botIndex,
+        item,
+      }))
+      .filter(entry => entry.normalizedIndex !== null);
+
+    const invalidIndexCount = outputs.length - indexedOutputs.length;
+    if (invalidIndexCount > 0) {
+      console.warn(`[LM] Batch decision returned ${invalidIndexCount} entries with invalid botIndex values`);
+    }
+
     const decisions = bots.map((bot, botIndex) => {
-      const match = outputs.find(item => item?.botIndex === botIndex);
+      const match = indexedOutputs.find(entry => entry.normalizedIndex === botIndex)?.item;
       if (!match) {
+        console.warn(`[LM] Batch decision miss for botIndex=${botIndex}; using fallback decision`);
         return getFallbackDecision(bot.extraversion, bot.reactivity);
       }
       return normalizeDecision(match);
     });
 
     return decisions;
-  } catch {
+  } catch (error) {
+    console.warn(
+      `[LM] decideBotActionsBatch fallback for ${bots.length} bots: model=${DECISION_MODEL}, reason=${error instanceof Error ? error.message : 'unknown'}`
+    );
     return bots.map(bot => getFallbackDecision(bot.extraversion, bot.reactivity));
   }
 }
@@ -367,20 +411,49 @@ Example: {"mode":"content","action":"idle","targetId":"","content":"actual post 
           return normalized;
         }
         qualityFailures++;
-      } catch {
+      } catch (error) {
+        console.warn(
+          `[LM] Content parse/generation failure: model=${modelOverride || CONTENT_MODEL}, temperature=${temperature}, isReply=${isReply}, reason=${error instanceof Error ? error.message : 'unknown'}`
+        );
         parseFailures++;
       }
     }
 
     if (parseFailures > 0 || qualityFailures > 0) {
       console.warn(
-        `[LM] Falling back to template content (parseFailures=${parseFailures}, qualityFailures=${qualityFailures}, isReply=${isReply})`
+        `[LM] Falling back to template content (model=${modelOverride || CONTENT_MODEL}, parseFailures=${parseFailures}, qualityFailures=${qualityFailures}, isReply=${isReply})`
       );
     }
 
-    return getFallbackContent(botDna.occupation, botDna.compassion, isReply, botDna.simulatedAge, context);
-  } catch {
-    return getFallbackContent(botDna.occupation, botDna.compassion, isReply, botDna.simulatedAge, context);
+    return getFallbackContent(
+      botDna.occupation,
+      botDna.compassion,
+      isReply,
+      botDna.simulatedAge,
+      context,
+      {
+        source: 'fallback',
+        parseFailures,
+        qualityFailures,
+        reason: parseFailures > 0 && qualityFailures > 0
+          ? 'parse_and_quality'
+          : parseFailures > 0
+            ? 'parse_failure'
+            : 'quality_filter',
+      }
+    );
+  } catch (error) {
+    console.warn(
+      `[LM] Fatal generateContent fallback: model=${modelOverride || CONTENT_MODEL}, isReply=${isReply}, reason=${error instanceof Error ? error.message : 'unknown'}`
+    );
+    return getFallbackContent(
+      botDna.occupation,
+      botDna.compassion,
+      isReply,
+      botDna.simulatedAge,
+      context,
+      { source: 'fallback', reason: 'fatal_error' }
+    );
   }
 }
 
@@ -406,7 +479,8 @@ function getFallbackContent(
   compassion: number,
   isReply: boolean,
   age = 30,
-  context = ''
+  context = '',
+  debug?: FallbackDebug
 ): ContentOutput {
   const mood = compassion > 0.6 ? 'reflective' : compassion < 0.4 ? 'irritated' : 'neutral';
   const topicSource = context.replace(/replying to\s+@[a-z0-9_]+\s+on\s+/i, '');
@@ -438,7 +512,7 @@ function getFallbackContent(
     return {
       content: pool[Math.floor(Math.random() * pool.length)],
       hashtags: [],
-      emotional_state: mood,
+      emotional_state: appendFallbackDebug(mood, debug),
     };
   }
 
@@ -461,7 +535,7 @@ function getFallbackContent(
     return {
       content: pool[Math.floor(Math.random() * pool.length)],
       hashtags: age < 28 ? [] : ['#JustSaying'],
-      emotional_state: mood,
+      emotional_state: appendFallbackDebug(mood, debug),
     };
   }
 
@@ -482,7 +556,7 @@ function getFallbackContent(
     return {
       content: pool[Math.floor(Math.random() * pool.length)],
       hashtags: ['#RealTalk'],
-      emotional_state: mood,
+      emotional_state: appendFallbackDebug(mood, debug),
     };
   }
 
@@ -503,6 +577,6 @@ function getFallbackContent(
   return {
     content: pool[Math.floor(Math.random() * pool.length)],
     hashtags: [],
-    emotional_state: mood,
+    emotional_state: appendFallbackDebug(mood, debug),
   };
 }

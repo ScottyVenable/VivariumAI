@@ -43,6 +43,19 @@ function sentimentShift(content: string, fallback: string): string {
   return fallback;
 }
 
+function splitEmotionalStateDebug(value: string): { mood: string; debugSuffix: string } {
+  const [moodRaw, debugRaw] = value.split('||debug:');
+  const mood = moodRaw.trim();
+  if (!debugRaw) return { mood, debugSuffix: '' };
+  return { mood, debugSuffix: `||debug:${debugRaw}` };
+}
+
+function attachEmotionalDebug(mood: string, debugSuffix: string): string {
+  const cleanMood = mood.trim();
+  if (!debugSuffix) return cleanMood;
+  return `${cleanMood}${debugSuffix}`;
+}
+
 type FeedPost = {
   id: string;
   content: string;
@@ -419,7 +432,7 @@ export async function runTick(timelineId: string): Promise<TickResult> {
         postId: result?.postId,
       });
     } catch (err) {
-      console.error(`Tick error for bot ${bot.username}:`, err);
+      console.error(`Tick error for bot ${bot.username} (decision=${botDecisions.get(bot.id)?.action ?? 'unknown'}):`, err);
     }
   }
 
@@ -483,13 +496,14 @@ async function executeAction(
         globalMood,
         trendingContext
       );
+      const outputState = splitEmotionalStateDebug(output.emotional_state);
       
       const rememberedTopic = output.hashtags[0] || postContext.slice(0, 48);
       const post = await prisma.post.create({
         data: {
           content: output.content,
           hashtags: JSON.stringify(output.hashtags),
-          emotionalState: output.emotional_state,
+          emotionalState: attachEmotionalDebug(outputState.mood, outputState.debugSuffix),
           authorId: bot.id,
           timelineId,
         },
@@ -498,7 +512,7 @@ async function executeAction(
       await prisma.bot.update({
         where: { id: bot.id },
         data: {
-          emotionalState: output.emotional_state,
+          emotionalState: outputState.mood,
           memory: remember(bot.memory, {
             topic: rememberedTopic,
             event: `Posted about ${rememberedTopic}`,
@@ -561,16 +575,18 @@ async function executeAction(
         trendingContext
       );
       const ancestorIds = await getAncestorIds(target.id);
+      const outputState = splitEmotionalStateDebug(output.emotional_state);
 
       // Emotional contagion: bot is slightly influenced by what it replies to
-      const shiftedMood = sentimentShift(target.content, output.emotional_state);
+      const shiftedMood = sentimentShift(target.content, outputState.mood);
+      const shiftedWithDebug = attachEmotionalDebug(shiftedMood, outputState.debugSuffix);
       const topic = output.hashtags[0] || summarizeTopic(target);
 
       const post = await prisma.post.create({
         data: {
           content: output.content,
           hashtags: JSON.stringify(output.hashtags),
-          emotionalState: shiftedMood,
+          emotionalState: shiftedWithDebug,
           authorId: bot.id,
           timelineId,
           parentId: target.id,
