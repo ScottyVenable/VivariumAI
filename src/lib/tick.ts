@@ -1,5 +1,5 @@
 import { prisma } from './db';
-import { decideBotAction, generateContent, BotDecision, DECISION_MODEL } from './lmstudio';
+import { decideBotActionsBatch, generateContent, BotDecision } from './lmstudio';
 import { parseBotMemory, remember } from './memory';
 import { adminConfig } from '@config/admin';
 
@@ -50,6 +50,7 @@ type FeedPost = {
   likeCount: number;
   replyCount: number;
   parentId: string | null;
+  parentAuthorId: string | null;
   author: { username: string; displayName: string; tier: string; isHuman: boolean };
 };
 
@@ -137,6 +138,7 @@ async function ensureAmbientHumans(timelineId: string, desiredCount = 3): Promis
         username: `ambient_${seed}`,
         displayName,
         occupation: 'Viewer',
+        talkingStyle: 'Casual audience tone, short reactions with social-media phrasing',
         bio: 'Ambient audience account',
         memory: '{}',
         reactivity: 0.45,
@@ -317,6 +319,7 @@ export async function runTick(timelineId: string): Promise<TickResult> {
       compassion: true,
       reasoningSkill: true,
       occupation: true,
+      talkingStyle: true,
       simulatedAge: true,
       emotionalState: true,
       humanSentiment: true,
@@ -342,11 +345,19 @@ export async function runTick(timelineId: string): Promise<TickResult> {
       likeCount: true,
       replyCount: true,
       parentId: true,
+      parent: {
+        select: {
+          authorId: true,
+        },
+      },
       author: { select: { username: true, displayName: true, tier: true, isHuman: true } },
     },
   });
 
-  const feedPosts: FeedPost[] = recentPosts;
+  const feedPosts: FeedPost[] = recentPosts.map(post => ({
+    ...post,
+    parentAuthorId: post.parent?.authorId ?? null,
+  }));
 
   // Derive trending hashtags and hot posts from engagement signals
   const trendingTags = extractTrending(feedPosts);
@@ -373,9 +384,29 @@ export async function runTick(timelineId: string): Promise<TickResult> {
       ? `"${feedPosts[0].content.slice(0, 80)}" (and similar things being talked about)`
       : 'what is on their mind';
 
+  const decisionBatchSize = Math.max(1, adminConfig.simulation.tick.decisionBatchSize);
+  const botDecisions = new Map<string, BotDecision>();
+
+  for (let i = 0; i < awakeBots.length; i += decisionBatchSize) {
+    const batch = awakeBots.slice(i, i + decisionBatchSize);
+    try {
+      const decisions = await decideBotActionsBatch(batch, recentPostsContext, timeline.globalMood);
+      decisions.forEach((decision, index) => {
+        const bot = batch[index];
+        if (bot) {
+          botDecisions.set(bot.id, decision);
+        }
+      });
+    } catch {
+      for (const bot of batch) {
+        botDecisions.set(bot.id, { action: 'idle' });
+      }
+    }
+  }
+
   for (const bot of awakeBots) {
     try {
-      const decision = await decideBotAction(bot, recentPostsContext, timeline.globalMood);
+      const decision = botDecisions.get(bot.id) ?? { action: 'idle' };
       const result = await executeAction(
         bot, decision, timelineId, feedPosts, hotPosts, conversationalPosts,
         timeline.globalMood, newPostContext, trendingContext
@@ -418,6 +449,7 @@ export async function runTick(timelineId: string): Promise<TickResult> {
 async function executeAction(
   bot: {
     id: string;
+    username: string;
     displayName: string;
     bio: string | null;
     memory?: string | null;
@@ -425,6 +457,7 @@ async function executeAction(
     compassion: number;
     reasoningSkill: number;
     occupation: string;
+    talkingStyle?: string | null;
     simulatedAge: number;
     emotionalState?: string | null;
     reactivity: number;
@@ -448,8 +481,7 @@ async function executeAction(
         postContext,
         false,
         globalMood,
-        trendingContext,
-        DECISION_MODEL
+        trendingContext
       );
       
       const rememberedTopic = output.hashtags[0] || postContext.slice(0, 48);
@@ -484,8 +516,15 @@ async function executeAction(
         ? recentPosts.find(p => p.id === decision.targetId)
         : undefined;
 
+      const ownThreadReplies = conversationalPosts.filter(post => post.parentAuthorId === bot.id && post.author.username !== bot.username);
+
       if (!target) {
-        if (Math.random() < adminConfig.simulation.decision.preferConversationalChance && conversationalPosts.length > 0) {
+        if (
+          ownThreadReplies.length > 0 &&
+          Math.random() < Math.min(0.95, adminConfig.simulation.decision.preferOwnThreadReplyChance * Math.max(0.2, bot.reactivity))
+        ) {
+          target = weightedPick(ownThreadReplies);
+        } else if (Math.random() < adminConfig.simulation.decision.preferConversationalChance && conversationalPosts.length > 0) {
           target = weightedPick(conversationalPosts);
         } else if (Math.random() < adminConfig.simulation.decision.preferHotPostChance && hotPosts.length > 0) {
           target = weightedPick(hotPosts);
@@ -519,8 +558,7 @@ async function executeAction(
         `Replying to @${target.author.username} on ${summarizeTopic(target)}: ${target.content}`,
         true,
         globalMood,
-        trendingContext,
-        DECISION_MODEL
+        trendingContext
       );
       const ancestorIds = await getAncestorIds(target.id);
 

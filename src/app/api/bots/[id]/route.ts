@@ -22,6 +22,7 @@ const EDITABLE_FIELDS = new Set([
   'humanSentiment',
   'simulatedAge',
   'occupation',
+  'talkingStyle',
   'netWorth',
   'emotionalState',
 ]);
@@ -84,7 +85,7 @@ export async function PATCH(
       continue;
     }
 
-    if (key === 'displayName' || key === 'bio' || key === 'memory' || key === 'avatarUrl' || key === 'occupation' || key === 'emotionalState') {
+    if (key === 'displayName' || key === 'bio' || key === 'memory' || key === 'avatarUrl' || key === 'occupation' || key === 'talkingStyle' || key === 'emotionalState') {
       updates[key] = parseString(value);
       continue;
     }

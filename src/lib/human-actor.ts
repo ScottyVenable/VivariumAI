@@ -22,6 +22,7 @@ export async function getOrCreateHumanActor(timelineId: string): Promise<string>
       username: `human_${timelineId}`,
       displayName: settings.displayName,
       occupation: settings.occupation,
+      talkingStyle: 'Direct and practical; short, grounded comments from the operator perspective',
       bio: settings.bio,
       reactivity: settings.defaults.reactivity,
       extraversion: settings.defaults.extraversion,
@@ -30,7 +31,7 @@ export async function getOrCreateHumanActor(timelineId: string): Promise<string>
       humanSentiment: settings.defaults.humanSentiment,
       influenceability: settings.defaults.influenceability,
       simulatedAge: settings.defaults.simulatedAge,
-    },
+    } as any,
     select: { id: true },
   });
 

@@ -26,6 +26,27 @@ export interface ContentOutput {
   emotional_state: string;
 }
 
+export interface DecisionBotProfile {
+  displayName: string;
+  tier: string;
+  reactivity: number;
+  extraversion: number;
+  compassion: number;
+  reasoningSkill?: number;
+  occupation: string;
+  simulatedAge?: number;
+  bio?: string | null;
+  memory?: string | null;
+  emotionalState?: string | null;
+  talkingStyle?: string | null;
+}
+
+type BatchedDecisionOutput = {
+  botIndex?: number;
+  action?: BotAction;
+  targetId?: string;
+};
+
 const LOW_SIGNAL_PHRASES = adminConfig.ai.content.lowSignalPhrases;
 
 const MASTER_SYSTEM_PROMPT = `You are the simulation mind of a bot inside Vivarium, an autonomous social-media world. You write real social-media posts — not descriptions of posts. Stay fully in character based on the provided age, personality, and occupation. If structured output is requested, return only valid JSON matching the requested fields.`;
@@ -54,7 +75,33 @@ function ageVoice(age: number): string {
 const VALID_ACTIONS: BotAction[] = ['post', 'reply', 'like', 'follow', 'idle'];
 
 function parseJsonObject<T>(raw: string): T {
-  return JSON.parse(raw) as T;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    const firstBrace = raw.indexOf('{');
+    const lastBrace = raw.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      return JSON.parse(raw.slice(firstBrace, lastBrace + 1)) as T;
+    }
+    throw new Error('Invalid JSON response');
+  }
+}
+
+function talkingStyleGuide(talkingStyle?: string | null): string {
+  const style = (talkingStyle || '').trim();
+  if (!style) return 'Balanced social tone. Medium sentence length, clear but casual wording.';
+  return style;
+}
+
+function getMemoryPrompt(raw?: string | null, compact = false): string {
+  const defaults = adminConfig.simulation.tick.memoryPrompt;
+  return memoryToPrompt(raw, {
+    compact,
+    topicLimit: defaults.topicLimit,
+    peopleLimit: defaults.peopleLimit,
+    recentLimit: defaults.recentLimit,
+    maxItemLength: defaults.maxItemLength,
+  });
 }
 
 function normalizeDecision(
@@ -126,19 +173,7 @@ function isLowQualityGeneratedText(content: string, context: string): boolean {
 }
 
 export async function decideBotAction(
-  botDna: {
-    displayName: string;
-    tier: string;
-    reactivity: number;
-    extraversion: number;
-    compassion: number;
-    reasoningSkill?: number;
-    occupation: string;
-    simulatedAge?: number;
-    bio?: string | null;
-    memory?: string | null;
-    emotionalState?: string | null;
-  },
+  botDna: DecisionBotProfile,
   recentPostsContext: string,
   globalMood: number
 ): Promise<BotDecision> {
@@ -150,6 +185,7 @@ export async function decideBotAction(
 - Age: ${botDna.simulatedAge ?? 'unknown'}
 - Tier: ${botDna.tier}
 - Occupation: ${botDna.occupation}
+- Talking Style: ${talkingStyleGuide(botDna.talkingStyle)}
 - Bio: ${botDna.bio || 'none'}
 - Reactivity: ${botDna.reactivity} (0=calm, 1=volatile)
 - Extraversion: ${botDna.extraversion} (0=introverted, 1=extroverted)
@@ -159,7 +195,7 @@ export async function decideBotAction(
 - Global Mood: ${globalMood} (0=divisive, 1=unified)
 
 Durable Memory:
-${memoryToPrompt(botDna.memory)}
+${getMemoryPrompt(botDna.memory, adminConfig.simulation.tick.memoryPrompt.compact)}
 
 Recent Timeline Posts:
 ${recentPostsContext}
@@ -188,18 +224,74 @@ Decision example:
   }
 }
 
+export async function decideBotActionsBatch(
+  bots: DecisionBotProfile[],
+  recentPostsContext: string,
+  globalMood: number
+): Promise<BotDecision[]> {
+  if (bots.length === 0) return [];
+
+  const systemPrompt = `${MASTER_SYSTEM_PROMPT}\n\nTask: Given a shared timeline context and a list of bot profiles, choose one action for each bot. Return ONLY a JSON object with this shape: {"decisions":[{"botIndex":0,"action":"post|reply|like|follow|idle","targetId":""}]}.\n\nDecision priorities:\n- Prefer reply when a thread is active, especially if a bot is responding to comments beneath its own posts.\n- Prefer reply for highly reactive bots and when memory references recurring people/topics in-context.\n- Prefer like/follow when engagement is useful but no strong text response is needed.\n- Prefer idle for low-signal feed moments.\n- Include targetId whenever action is reply/like/follow and a suitable target exists in context.`;
+
+  const compactProfiles = bots
+    .map((bot, index) => {
+      const memory = getMemoryPrompt(bot.memory, true);
+      return [
+        `- botIndex: ${index}`,
+        `  name: ${bot.displayName}`,
+        `  tier: ${bot.tier}`,
+        `  age: ${bot.simulatedAge ?? 'unknown'}`,
+        `  role: ${bot.occupation}`,
+        `  style: ${talkingStyleGuide(bot.talkingStyle)}`,
+        `  mood: ${bot.emotionalState || 'neutral'}`,
+        `  dna: reactivity=${bot.reactivity}, extraversion=${bot.extraversion}, compassion=${bot.compassion}, reasoning=${bot.reasoningSkill ?? 0.5}`,
+        `  memory: ${memory}`,
+      ].join('\n');
+    })
+    .join('\n\n');
+
+  const userPrompt = `Global Mood: ${globalMood} (0=divisive, 1=unified)
+
+Recent Timeline Posts:
+${recentPostsContext}
+
+Bots:
+${compactProfiles}
+
+Return one decision per botIndex in ascending order. Output JSON only.`;
+
+  try {
+    const response = await lmClient.chat.completions.create({
+      model: DECISION_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: Math.max(adminConfig.ai.decision.maxTokens * 2, bots.length * 70),
+      temperature: adminConfig.ai.decision.temperature,
+      response_format: { type: 'json_object' },
+    });
+
+    const raw = response.choices[0]?.message?.content?.trim() || '{"decisions":[]}';
+    const parsed = parseJsonObject<{ decisions?: BatchedDecisionOutput[] }>(raw);
+    const outputs = Array.isArray(parsed.decisions) ? parsed.decisions : [];
+
+    const decisions = bots.map((bot, botIndex) => {
+      const match = outputs.find(item => item?.botIndex === botIndex);
+      if (!match) {
+        return getFallbackDecision(bot.extraversion, bot.reactivity);
+      }
+      return normalizeDecision(match);
+    });
+
+    return decisions;
+  } catch {
+    return bots.map(bot => getFallbackDecision(bot.extraversion, bot.reactivity));
+  }
+}
+
 export async function generateContent(
-  botDna: {
-    displayName: string;
-    tier: string;
-    compassion: number;
-    reasoningSkill: number;
-    occupation: string;
-    simulatedAge: number;
-    bio?: string | null;
-    memory?: string | null;
-    emotionalState?: string | null;
-  },
+  botDna: DecisionBotProfile & { simulatedAge: number; reasoningSkill: number },
   context: string,
   isReply: boolean,
   globalMood: number,
@@ -216,6 +308,8 @@ export async function generateContent(
 
 ${voice}
 
+Talking style guide: ${talkingStyleGuide(botDna.talkingStyle)}
+
 Task: Write a real social media post or reply as this character. Return ONLY valid JSON using this schema: ${UNIFIED_JSON_SCHEMA}. Set mode="content", fill content/hashtags/emotional_state, set action="idle", set targetId="".
 
 Rules:
@@ -230,6 +324,7 @@ Rules:
     const userPrompt = `Character:
 - Name: ${botDna.displayName}, ${botDna.simulatedAge} years old
 - Job: ${botDna.occupation}
+- Talking Style: ${talkingStyleGuide(botDna.talkingStyle)}
 - Bio: ${botDna.bio || 'none'}
 - Tone: ${toneLabel}
 - Reasoning style: ${reasoningLabel}
@@ -238,7 +333,7 @@ Rules:
 ${trendingContext ? `- Currently trending on the platform: ${trendingContext}` : ''}
 
 Durable Memory:
-${memoryToPrompt(botDna.memory)}
+${getMemoryPrompt(botDna.memory, adminConfig.simulation.tick.memoryPrompt.compact)}
 
 ${isReply ? `They are replying to this post: "${context}"` : `They are posting about: ${context}`}
 
@@ -249,30 +344,49 @@ Output JSON shape: ${UNIFIED_JSON_SCHEMA}
 Example: {"mode":"content","action":"idle","targetId":"","content":"actual post text here","hashtags":["#tag"],"emotional_state":"mood word"}`;
 
     const temperatures = adminConfig.ai.content.temperatures;
-    for (const temperature of temperatures) {
-      const response = await lmClient.chat.completions.create({
-        model: modelOverride || CONTENT_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        max_tokens: adminConfig.ai.content.maxTokens,
-        temperature,
-        response_format: { type: 'json_object' },
-      });
+    let parseFailures = 0;
+    let qualityFailures = 0;
 
-      const raw = response.choices[0]?.message?.content?.trim() || '';
-      const parsed = parseJsonObject<Partial<ContentOutput>>(raw);
-      const normalized = normalizeContent(parsed);
-      if (normalized && !isLowQualityGeneratedText(normalized.content, context)) {
-        return normalized;
+    for (const temperature of temperatures) {
+      try {
+        const response = await lmClient.chat.completions.create({
+          model: modelOverride || CONTENT_MODEL,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          max_tokens: adminConfig.ai.content.maxTokens,
+          temperature,
+          response_format: { type: 'json_object' },
+        });
+
+        const raw = response.choices[0]?.message?.content?.trim() || '';
+        const parsed = parseJsonObject<Partial<ContentOutput>>(raw);
+        const normalized = normalizeContent(parsed);
+        if (normalized && !isLowQualityGeneratedText(normalized.content, context)) {
+          return normalized;
+        }
+        qualityFailures++;
+      } catch {
+        parseFailures++;
       }
+    }
+
+    if (parseFailures > 0 || qualityFailures > 0) {
+      console.warn(
+        `[LM] Falling back to template content (parseFailures=${parseFailures}, qualityFailures=${qualityFailures}, isReply=${isReply})`
+      );
     }
 
     return getFallbackContent(botDna.occupation, botDna.compassion, isReply, botDna.simulatedAge, context);
   } catch {
     return getFallbackContent(botDna.occupation, botDna.compassion, isReply, botDna.simulatedAge, context);
   }
+}
+
+function extractReplyHandle(context: string): string | null {
+  const match = context.match(/replying to\s+@([a-z0-9_]+)/i);
+  return match ? `@${match[1]}` : null;
 }
 
 function getFallbackDecision(extraversion: number, reactivity: number): BotDecision {
@@ -295,11 +409,14 @@ function getFallbackContent(
   context = ''
 ): ContentOutput {
   const mood = compassion > 0.6 ? 'reflective' : compassion < 0.4 ? 'irritated' : 'neutral';
-  const contextTopic = context
+  const topicSource = context.replace(/replying to\s+@[a-z0-9_]+\s+on\s+/i, '');
+  const contextTopic = topicSource
     .replace(/\s+/g, ' ')
     .replace(/["'`]/g, '')
     .trim()
     .slice(0, 70);
+  const replyHandle = extractReplyHandle(context);
+  const replyPrefix = replyHandle ? `${replyHandle} ` : '';
 
   // Age-bucketed fallback pools
   if (age <= 22) {
@@ -356,10 +473,10 @@ function getFallbackContent(
       `People keep asking what I think about this. Honestly? I do not have a clean answer yet.`,
     ];
     const replies = [
-      'You make a fair point, though I would push back on part of it.',
-      'This is closer to right than most takes I have seen.',
-      'Worth thinking about. I am not fully convinced but I hear you.',
-      'I used to think the same thing. Then I worked in it.',
+      contextTopic ? `${replyPrefix}on ${contextTopic}, you are right about the core issue, but the tradeoff matters.` : `${replyPrefix}you make a fair point, though I would push back on part of it.`,
+      contextTopic ? `${replyPrefix}the part about ${contextTopic} is where I think your argument is strongest.` : `${replyPrefix}this is closer to right than most takes I have seen.`,
+      contextTopic ? `${replyPrefix}worth thinking about — I am not fully convinced on ${contextTopic}, but I hear you.` : `${replyPrefix}worth thinking about. I am not fully convinced but I hear you.`,
+      contextTopic ? `${replyPrefix}I used to think the same thing about ${contextTopic}, then I saw the downside up close.` : `${replyPrefix}I used to think the same thing. Then I worked in it.`,
     ];
     const pool = isReply ? replies : posts;
     return {
@@ -377,10 +494,10 @@ function getFallbackContent(
     `After all these years in ${occupation.toLowerCase()}, some things still manage to surprise me.`,
   ];
   const replies = [
-    'Thank you for saying what many of us are thinking.',
-    'I respectfully disagree, and here is why.',
-    'This is an important point that deserves more attention.',
-    'I have seen this before and it did not end well.',
+    contextTopic ? `${replyPrefix}thank you for raising ${contextTopic}; that concern is more important than people admit.` : `${replyPrefix}thank you for saying this — the concern is valid.`,
+    contextTopic ? `${replyPrefix}I respectfully disagree on ${contextTopic}; the incentives lead somewhere else.` : `${replyPrefix}I respectfully disagree, and here is why.`,
+    contextTopic ? `${replyPrefix}this point on ${contextTopic} deserves more serious attention.` : `${replyPrefix}this is an important point that deserves more attention.`,
+    contextTopic ? `${replyPrefix}I have seen this pattern around ${contextTopic} before, and it did not end well.` : `${replyPrefix}I have seen this before and it did not end well.`,
   ];
   const pool = isReply ? replies : posts;
   return {

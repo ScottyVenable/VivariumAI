@@ -4,6 +4,14 @@ export interface BotMemoryState {
   recent: string[];
 }
 
+export interface MemoryPromptOptions {
+  compact?: boolean;
+  topicLimit?: number;
+  peopleLimit?: number;
+  recentLimit?: number;
+  maxItemLength?: number;
+}
+
 const EMPTY_MEMORY: BotMemoryState = {
   topics: [],
   people: [],
@@ -44,21 +52,52 @@ export function stringifyBotMemory(memory: BotMemoryState): string {
   });
 }
 
-export function memoryToPrompt(raw?: string | null): string {
+function truncate(value: string, maxItemLength: number): string {
+  if (value.length <= maxItemLength) return value;
+  return `${value.slice(0, maxItemLength - 1).trimEnd()}…`;
+}
+
+export function memoryToPrompt(raw?: string | null, options?: MemoryPromptOptions): string {
   const memory = parseBotMemory(raw);
+  const compact = options?.compact ?? false;
+  const topicLimit = options?.topicLimit ?? (compact ? 3 : 6);
+  const peopleLimit = options?.peopleLimit ?? (compact ? 3 : 6);
+  const recentLimit = options?.recentLimit ?? (compact ? 3 : 8);
+  const maxItemLength = options?.maxItemLength ?? (compact ? 48 : 120);
+
+  const topics = memory.topics
+    .slice(0, topicLimit)
+    .map(topic => truncate(topic, maxItemLength));
+  const people = memory.people
+    .slice(0, peopleLimit)
+    .map(person => truncate(person, maxItemLength));
+  const recent = memory.recent
+    .slice(0, recentLimit)
+    .map(event => truncate(event, maxItemLength));
+
   const parts: string[] = [];
 
-  if (memory.topics.length > 0) {
-    parts.push(`Recurring topics: ${memory.topics.join(', ')}`);
+  if (topics.length > 0) {
+    parts.push(`Recurring topics: ${topics.join(', ')}`);
   }
-  if (memory.people.length > 0) {
-    parts.push(`Recurring people: ${memory.people.join(', ')}`);
+  if (people.length > 0) {
+    parts.push(`Recurring people: ${people.join(', ')}`);
   }
-  if (memory.recent.length > 0) {
-    parts.push(`Recent memories: ${memory.recent.join(' | ')}`);
+  if (recent.length > 0) {
+    parts.push(`Recent memories: ${recent.join(' | ')}`);
   }
 
-  return parts.length > 0 ? parts.join('\n') : 'No durable memory yet.';
+  if (parts.length === 0) {
+    return compact ? 'No durable memory.' : 'No durable memory yet.';
+  }
+
+  if (compact) {
+    return parts
+      .map(part => part.replace('Recurring ', '').replace('Recent memories', 'Recent'))
+      .join(' || ');
+  }
+
+  return parts.join('\n');
 }
 
 export function remember(

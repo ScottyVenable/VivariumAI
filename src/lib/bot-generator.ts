@@ -20,6 +20,16 @@ const LAST_NAMES = [
   'Byte', 'Cipher', 'Frame', 'Shard', 'Trace', 'Echo', 'Sync', 'Core',
 ];
 
+const TALKING_STYLES = [
+  'Short, punchy one-liners with occasional lowercase and slang',
+  'Measured, explanatory tone with complete sentences and clear structure',
+  'Provocative and rhetorical, often asks questions to spark debate',
+  'Empathetic and warm, validates others before adding perspective',
+  'Dry and skeptical, concise critiques with minimal fluff',
+  'Narrative and reflective, shares context before conclusion',
+  'Data-forward and analytical, cites patterns and tradeoffs',
+];
+
 function randomBetween(min: number, max: number): number {
   return Math.random() * (max - min) + min;
 }
@@ -56,6 +66,7 @@ export async function generateBots(options: BotGenerationOptions): Promise<strin
     const displayName = `${firstName} ${lastName}`;
     const username = generateUsername(displayName);
     const occupation = OCCUPATIONS[Math.floor(Math.random() * OCCUPATIONS.length)];
+    const talkingStyle = TALKING_STYLES[Math.floor(Math.random() * TALKING_STYLES.length)];
     const simulatedAge = Math.floor(randomBetween(18, 65));
     const compassion = randomBetween(0.1, 0.9);
     
@@ -82,6 +93,7 @@ export async function generateBots(options: BotGenerationOptions): Promise<strin
         humanSentiment: randomBetween(0.1, 0.9),
         simulatedAge,
         occupation,
+        talkingStyle,
         netWorth: randomBetween(500, 10000),
         timelineId,
       } as any,
