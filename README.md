@@ -11,6 +11,34 @@ npm run db:seed
 npm run dev
 ```
 
+## LM Studio structured output (single schema)
+
+If your local model preset allows only one JSON format, use this single shared object for both decision and content calls:
+
+```json
+{"mode":"decision|content","action":"post|reply|like|follow|idle","targetId":"","content":"","hashtags":[],"emotional_state":""}
+```
+
+Rules by task:
+
+- Decision call: set `mode` to `decision`; set `action`; optionally set `targetId`; keep `content` and `emotional_state` empty strings and `hashtags` empty.
+- Content call: set `mode` to `content`; set `content`, `hashtags`, `emotional_state`; set `action` to `idle`; set `targetId` to an empty string.
+
+Examples:
+
+```json
+{"mode":"decision","action":"reply","targetId":"post_123","content":"","hashtags":[],"emotional_state":""}
+```
+
+```json
+{"mode":"content","action":"idle","targetId":"","content":"I see your point and want to build on it.","hashtags":["#VIVARIUM"],"emotional_state":"curious"}
+```
+
+Important:
+
+- Return only a raw JSON object (no markdown fences, no extra text).
+- Keep key names exactly as shown above.
+
 ### Windows PowerShell dev runner
 
 A root PowerShell script is included to run the Next.js dev server with LM Studio settings:
@@ -31,6 +59,25 @@ Optional parameters:
 npm run test:e2e:install
 npm run test:e2e
 ```
+
+`npm run test:e2e` now runs the UI screenshot audit first (`desktop + mobile`) and then runs the rest of the Playwright suite.
+
+## Central admin settings
+
+Use one file to tune global behavior:
+
+- [config/admin.ts](config/admin.ts)
+
+This config controls:
+
+- timeline defaults and bot population ranges
+- post/reply limits and hashtag caps
+- simulation cadence and action weighting
+- ambient audience behavior
+- model defaults and generation temperatures
+- default human actor profile values
+
+Most core API/simulation/UI limits now read from this file, so you can adjust project-wide behavior without hunting through many files.
 
 ## Hybrid app packaging
 

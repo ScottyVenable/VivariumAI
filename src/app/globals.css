@@ -24,6 +24,34 @@ body {
 html {
   background: var(--background);
   color-scheme: dark;
+  height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  min-height: 100%;
+  overflow-x: hidden;
+}
+
+*:not(input):not(textarea):not([contenteditable='true']) {
+  caret-color: transparent;
+}
+
+input,
+textarea,
+[contenteditable='true'] {
+  caret-color: auto;
+}
+
+main,
+aside,
+section,
+div {
+  overscroll-behavior: contain;
+}
+
+* {
+  -webkit-overflow-scrolling: touch;
 }
 
 button,
@@ -36,6 +64,7 @@ textarea {
 a,
 button {
   touch-action: manipulation;
+  user-select: none;
 }
 
 ::-webkit-scrollbar {

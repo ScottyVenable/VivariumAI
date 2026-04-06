@@ -11,6 +11,7 @@ import {
 const EDITABLE_FIELDS = new Set([
   'displayName',
   'bio',
+  'memory',
   'avatarUrl',
   'tier',
   'influenceability',
@@ -50,7 +51,13 @@ export async function GET(
     return NextResponse.json({ error: 'Bot not found' }, { status: 404 });
   }
 
-  return NextResponse.json(bot);
+  return NextResponse.json({
+    ...bot,
+    posts: bot.posts.map(post => ({
+      ...post,
+      hashtags: JSON.parse(post.hashtags || '[]') as string[],
+    })),
+  });
 }
 
 export async function PATCH(
@@ -77,7 +84,7 @@ export async function PATCH(
       continue;
     }
 
-    if (key === 'displayName' || key === 'bio' || key === 'avatarUrl' || key === 'occupation' || key === 'emotionalState') {
+    if (key === 'displayName' || key === 'bio' || key === 'memory' || key === 'avatarUrl' || key === 'occupation' || key === 'emotionalState') {
       updates[key] = parseString(value);
       continue;
     }
