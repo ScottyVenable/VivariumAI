@@ -26,11 +26,93 @@ export interface ContentOutput {
   emotional_state: string;
 }
 
+export interface DecisionBotProfile {
+  displayName: string;
+  tier: string;
+  reactivity: number;
+  extraversion: number;
+  compassion: number;
+  reasoningSkill?: number;
+  occupation: string;
+  simulatedAge?: number;
+  bio?: string | null;
+  memory?: string | null;
+  emotionalState?: string | null;
+  talkingStyle?: string | null;
+}
+
+type BatchedDecisionOutput = {
+  botIndex?: number | string;
+  index?: number | string;
+  bot_index?: number | string;
+  action?: BotAction;
+  decision?: BotAction;
+  targetId?: string;
+};
+
+type FallbackDebug = {
+  source: 'fallback';
+  parseFailures?: number;
+  qualityFailures?: number;
+  reason?: string;
+};
+
 const LOW_SIGNAL_PHRASES = adminConfig.ai.content.lowSignalPhrases;
 
 const MASTER_SYSTEM_PROMPT = `You are the simulation mind of a bot inside Vivarium, an autonomous social-media world. You write real social-media posts — not descriptions of posts. Stay fully in character based on the provided age, personality, and occupation. If structured output is requested, return only valid JSON matching the requested fields.`;
 
 const UNIFIED_JSON_SCHEMA = `{"mode":"decision|content","action":"post|reply|like|follow|idle","targetId":"","content":"","hashtags":[],"emotional_state":""}`;
+
+const SINGLE_RESPONSE_JSON_SCHEMA = {
+  name: 'vivarium_single_response',
+  schema: {
+    type: 'object',
+    properties: {
+      mode: { type: 'string' },
+      action: { type: 'string', enum: ['post', 'reply', 'like', 'follow', 'idle'] },
+      targetId: { type: 'string' },
+      content: { type: 'string' },
+      hashtags: {
+        type: 'array',
+        items: { type: 'string' },
+      },
+      emotional_state: { type: 'string' },
+    },
+    required: ['action'],
+    additionalProperties: true,
+  },
+  strict: false,
+} as const;
+
+const BATCH_RESPONSE_JSON_SCHEMA = {
+  name: 'vivarium_batch_decisions',
+  schema: {
+    type: 'object',
+    properties: {
+      decisions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            botIndex: {
+              anyOf: [
+                { type: 'integer' },
+                { type: 'string' },
+              ],
+            },
+            action: { type: 'string', enum: ['post', 'reply', 'like', 'follow', 'idle'] },
+            targetId: { type: 'string' },
+          },
+          required: ['botIndex', 'action'],
+          additionalProperties: true,
+        },
+      },
+    },
+    required: ['decisions'],
+    additionalProperties: true,
+  },
+  strict: false,
+} as const;
 
 function ageVoice(age: number): string {
   if (age <= 20) {
@@ -53,8 +135,267 @@ function ageVoice(age: number): string {
 
 const VALID_ACTIONS: BotAction[] = ['post', 'reply', 'like', 'follow', 'idle'];
 
+type ChatMessage = { role: 'system' | 'user'; content: string };
+
+async function requestJsonContent(params: {
+  model: string;
+  messages: ChatMessage[];
+  max_tokens: number;
+  temperature: number;
+  jsonSchema: typeof SINGLE_RESPONSE_JSON_SCHEMA | typeof BATCH_RESPONSE_JSON_SCHEMA;
+}): Promise<string> {
+  const structured = await lmClient.chat.completions.create({
+    model: params.model,
+    messages: params.messages,
+    max_tokens: params.max_tokens,
+    temperature: params.temperature,
+    response_format: {
+      type: 'json_schema',
+      json_schema: params.jsonSchema,
+    },
+  });
+
+  const structuredRaw = structured.choices[0]?.message?.content?.trim() || '';
+  if (structuredRaw.length > 0) {
+    return structuredRaw;
+  }
+
+  console.warn(`[LM] Empty structured output from model=${params.model}; retrying with text response format`);
+
+  const text = await lmClient.chat.completions.create({
+    model: params.model,
+    messages: params.messages,
+    max_tokens: params.max_tokens,
+    temperature: params.temperature,
+    response_format: {
+      type: 'text',
+    },
+  });
+
+  const textRaw = text.choices[0]?.message?.content?.trim() || '';
+  if (textRaw.length > 0) {
+    return textRaw;
+  }
+
+  throw new Error('Empty model response');
+}
+
 function parseJsonObject<T>(raw: string): T {
-  return JSON.parse(raw) as T;
+  const input = raw.trim();
+
+  const attempts: string[] = [];
+
+  const withoutFence = input
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  if (withoutFence) attempts.push(withoutFence);
+
+  if (input) attempts.push(input);
+
+  const firstBrace = withoutFence.indexOf('{');
+  const lastBrace = withoutFence.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    attempts.push(withoutFence.slice(firstBrace, lastBrace + 1));
+  }
+
+  const firstBracket = withoutFence.indexOf('[');
+  const lastBracket = withoutFence.lastIndexOf(']');
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    attempts.push(withoutFence.slice(firstBracket, lastBracket + 1));
+  }
+
+  const uniqueAttempts = [...new Set(attempts)];
+  for (const candidate of uniqueAttempts) {
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      const noTrailingCommas = candidate.replace(/,\s*([}\]])/g, '$1');
+      if (noTrailingCommas !== candidate) {
+        try {
+          return JSON.parse(noTrailingCommas) as T;
+        } catch {
+          // Continue to next strategy
+        }
+      }
+
+      const normalizedLikeJson = candidate
+        .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)/g, '$1"$2"$3')
+        .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_, group: string) => `"${group.replace(/"/g, '\\"')}"`);
+      if (normalizedLikeJson !== candidate) {
+        try {
+          return JSON.parse(normalizedLikeJson) as T;
+        } catch {
+          // Continue to next strategy
+        }
+      }
+    }
+  }
+
+  const preview = withoutFence.slice(0, 220).replace(/\s+/g, ' ');
+  throw new Error(`Invalid JSON response: ${preview || 'empty'}`);
+}
+
+function talkingStyleGuide(talkingStyle?: string | null): string {
+  const style = (talkingStyle || '').trim();
+  if (!style) return 'Balanced social tone. Medium sentence length, clear but casual wording.';
+  return style;
+}
+
+function normalizeBotIndex(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isInteger(value)) return value;
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number.parseInt(value.trim(), 10);
+  return null;
+}
+
+function extractBatchedDecisionArray(parsed: unknown): BatchedDecisionOutput[] {
+  if (Array.isArray(parsed)) {
+    return parsed as BatchedDecisionOutput[];
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return [];
+  }
+
+  const maybeSingle = parsed as Record<string, unknown>;
+  const maybeSingleAction = typeof maybeSingle.action === 'string'
+    ? maybeSingle.action
+    : typeof maybeSingle.decision === 'string'
+      ? maybeSingle.decision
+      : null;
+
+  if (maybeSingleAction && VALID_ACTIONS.includes(maybeSingleAction as BotAction)) {
+    return [{
+      botIndex: 0,
+      action: maybeSingleAction as BotAction,
+      targetId: typeof maybeSingle.targetId === 'string' ? maybeSingle.targetId : undefined,
+    }];
+  }
+
+  const obj = parsed as {
+    decisions?: unknown;
+    data?: { decisions?: unknown };
+    output?: { decisions?: unknown };
+    result?: { decisions?: unknown };
+  };
+
+  if (Array.isArray(obj.decisions)) {
+    return obj.decisions as BatchedDecisionOutput[];
+  }
+
+  if (Array.isArray(obj.data?.decisions)) {
+    return obj.data.decisions as BatchedDecisionOutput[];
+  }
+
+  if (Array.isArray(obj.output?.decisions)) {
+    return obj.output.decisions as BatchedDecisionOutput[];
+  }
+
+  if (Array.isArray(obj.result?.decisions)) {
+    return obj.result.decisions as BatchedDecisionOutput[];
+  }
+
+  return [];
+}
+
+function normalizeBatchDecisionItem(input: BatchedDecisionOutput | null | undefined): BatchedDecisionOutput {
+  const action = typeof input?.action === 'string'
+    ? input.action
+    : typeof input?.decision === 'string'
+      ? input.decision
+      : undefined;
+
+  const botIndex = input?.botIndex ?? input?.index ?? input?.bot_index;
+  const targetId = typeof input?.targetId === 'string' ? input.targetId : undefined;
+
+  return {
+    botIndex,
+    action: action as BotAction | undefined,
+    targetId,
+  };
+}
+
+function extractContentFromRawText(raw: string, fallbackMood = 'neutral'): ContentOutput | null {
+  const collapsed = raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!collapsed || collapsed.length > adminConfig.content.maxLength) {
+    return null;
+  }
+
+  const contentFieldMatch = collapsed.match(/(?:^|[,{\s])["']?content["']?\s*[:=]\s*([\s\S]+?)(?:(?:[,\n]\s*["']?(?:hashtags|emotional[_\s-]?state|action|mode|targetId)["']?\s*[:=])|$)/i);
+  const emotionalFieldMatch = collapsed.match(/["']?emotional[_\s-]?state["']?\s*[:=]\s*["']?([^"'\n,}{]+)["']?/i);
+  const hashtagFieldMatch = collapsed.match(/["']?hashtags["']?\s*[:=]\s*\[([^\]]*)\]/i);
+
+  const contentCandidate = contentFieldMatch?.[1] ?? collapsed;
+  const content = contentCandidate
+    .replace(/^content\s*:\s*/i, '')
+    .replace(/^"|"$/g, '')
+    .replace(/\s*[}\]]\s*$/g, '')
+    .trim();
+
+  if (!content || content.length > adminConfig.content.maxLength) {
+    return null;
+  }
+
+  const listTags = (hashtagFieldMatch?.[1] ?? '')
+    .split(',')
+    .map(tag => tag.replace(/["'\s]/g, ''))
+    .filter(tag => tag.length > 0)
+    .map(tag => (tag.startsWith('#') ? tag : `#${tag}`));
+
+  const inlineTags = content.match(/#[a-z0-9_]+/gi) ?? [];
+  const hashtags = [...new Set([...listTags, ...inlineTags])].slice(0, 3);
+
+  const emotionalState = emotionalFieldMatch?.[1]?.trim() || fallbackMood;
+
+  return {
+    content,
+    hashtags,
+    emotional_state: emotionalState,
+  };
+}
+
+function maybeUnwrapEmbeddedContent(content: string, fallbackMood: string): ContentOutput | null {
+  const candidate = content.trim();
+  if (!candidate.startsWith('{') || !/"?content"?\s*:/.test(candidate)) {
+    return null;
+  }
+
+  try {
+    const parsed = parseJsonObject<Partial<ContentOutput>>(candidate);
+    const normalized = normalizeContent(parsed);
+    if (normalized) return normalized;
+  } catch {
+    // continue to text rescue
+  }
+
+  return extractContentFromRawText(candidate, fallbackMood);
+}
+
+function appendFallbackDebug(emotionalState: string, debug?: FallbackDebug): string {
+  if (!debug) return emotionalState;
+  const parts = [
+    `source=${debug.source}`,
+    `parse=${debug.parseFailures ?? 0}`,
+    `quality=${debug.qualityFailures ?? 0}`,
+    `reason=${debug.reason ?? 'unknown'}`,
+  ];
+  return `${emotionalState}||debug:${parts.join(';')}`;
+}
+
+function getMemoryPrompt(raw?: string | null, compact = false): string {
+  const defaults = adminConfig.simulation.tick.memoryPrompt;
+  return memoryToPrompt(raw, {
+    compact,
+    topicLimit: defaults.topicLimit,
+    peopleLimit: defaults.peopleLimit,
+    recentLimit: defaults.recentLimit,
+    maxItemLength: defaults.maxItemLength,
+  });
 }
 
 function normalizeDecision(
@@ -86,6 +427,11 @@ function normalizeContent(input: Partial<ContentOutput> | null | undefined): Con
   const emotionalState = typeof input?.emotional_state === 'string'
     ? input.emotional_state.trim()
     : '';
+
+  const unwrapped = maybeUnwrapEmbeddedContent(content, emotionalState || 'neutral');
+  if (unwrapped) {
+    return unwrapped;
+  }
 
   if (!content || !emotionalState || content.length > adminConfig.content.maxLength) {
     return null;
@@ -126,19 +472,7 @@ function isLowQualityGeneratedText(content: string, context: string): boolean {
 }
 
 export async function decideBotAction(
-  botDna: {
-    displayName: string;
-    tier: string;
-    reactivity: number;
-    extraversion: number;
-    compassion: number;
-    reasoningSkill?: number;
-    occupation: string;
-    simulatedAge?: number;
-    bio?: string | null;
-    memory?: string | null;
-    emotionalState?: string | null;
-  },
+  botDna: DecisionBotProfile,
   recentPostsContext: string,
   globalMood: number
 ): Promise<BotDecision> {
@@ -150,6 +484,7 @@ export async function decideBotAction(
 - Age: ${botDna.simulatedAge ?? 'unknown'}
 - Tier: ${botDna.tier}
 - Occupation: ${botDna.occupation}
+- Talking Style: ${talkingStyleGuide(botDna.talkingStyle)}
 - Bio: ${botDna.bio || 'none'}
 - Reactivity: ${botDna.reactivity} (0=calm, 1=volatile)
 - Extraversion: ${botDna.extraversion} (0=introverted, 1=extroverted)
@@ -159,7 +494,7 @@ export async function decideBotAction(
 - Global Mood: ${globalMood} (0=divisive, 1=unified)
 
 Durable Memory:
-${memoryToPrompt(botDna.memory)}
+${getMemoryPrompt(botDna.memory, adminConfig.simulation.tick.memoryPrompt.compact)}
 
 Recent Timeline Posts:
 ${recentPostsContext}
@@ -169,7 +504,7 @@ Output JSON must use exactly this object shape: ${UNIFIED_JSON_SCHEMA}
 Decision example:
 {"mode":"decision","action":"reply","targetId":"post_123","content":"actual reply text","hashtags":[],"emotional_state":"curious"}`;
 
-    const response = await lmClient.chat.completions.create({
+    const raw = await requestJsonContent({
       model: DECISION_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
@@ -177,29 +512,110 @@ Decision example:
       ],
       max_tokens: adminConfig.ai.decision.maxTokens,
       temperature: adminConfig.ai.decision.temperature,
-      response_format: { type: 'json_object' },
+      jsonSchema: SINGLE_RESPONSE_JSON_SCHEMA,
     });
 
-    const raw = response.choices[0]?.message?.content?.trim() || '{"action":"idle"}';
     const parsed = parseJsonObject<Partial<BotDecision & { content: string; hashtags: string[]; emotional_state: string }>>(raw);
     return normalizeDecision(parsed);
-  } catch {
+  } catch (error) {
+    console.warn(
+      `[LM] decideBotAction fallback: model=${DECISION_MODEL}, reason=${error instanceof Error ? error.message : 'unknown'}`
+    );
     return getFallbackDecision(botDna.extraversion, botDna.reactivity);
   }
 }
 
+export async function decideBotActionsBatch(
+  bots: DecisionBotProfile[],
+  recentPostsContext: string,
+  globalMood: number
+): Promise<BotDecision[]> {
+  if (bots.length === 0) return [];
+
+  const systemPrompt = `${MASTER_SYSTEM_PROMPT}\n\nTask: Given a shared timeline context and a list of bot profiles, choose one action for each bot. Return ONLY a JSON object with this shape: {"decisions":[{"botIndex":0,"action":"post|reply|like|follow|idle","targetId":""}]}.\n\nDecision priorities:\n- Prefer reply when a thread is active, especially if a bot is responding to comments beneath its own posts.\n- Prefer reply for highly reactive bots and when memory references recurring people/topics in-context.\n- Prefer like/follow when engagement is useful but no strong text response is needed.\n- Prefer idle for low-signal feed moments.\n- Include targetId whenever action is reply/like/follow and a suitable target exists in context.`;
+
+  const compactProfiles = bots
+    .map((bot, index) => {
+      const memory = getMemoryPrompt(bot.memory, true);
+      return [
+        `- botIndex: ${index}`,
+        `  name: ${bot.displayName}`,
+        `  tier: ${bot.tier}`,
+        `  age: ${bot.simulatedAge ?? 'unknown'}`,
+        `  role: ${bot.occupation}`,
+        `  style: ${talkingStyleGuide(bot.talkingStyle)}`,
+        `  mood: ${bot.emotionalState || 'neutral'}`,
+        `  dna: reactivity=${bot.reactivity}, extraversion=${bot.extraversion}, compassion=${bot.compassion}, reasoning=${bot.reasoningSkill ?? 0.5}`,
+        `  memory: ${memory}`,
+      ].join('\n');
+    })
+    .join('\n\n');
+
+  const userPrompt = `Global Mood: ${globalMood} (0=divisive, 1=unified)
+
+Recent Timeline Posts:
+${recentPostsContext}
+
+Bots:
+${compactProfiles}
+
+Return one decision per botIndex in ascending order. Output JSON only.`;
+
+  try {
+    const raw = await requestJsonContent({
+      model: DECISION_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: Math.max(adminConfig.ai.decision.maxTokens * 2, bots.length * 70),
+      temperature: adminConfig.ai.decision.temperature,
+      jsonSchema: BATCH_RESPONSE_JSON_SCHEMA,
+    });
+
+    const parsed = parseJsonObject<unknown>(raw);
+    const outputs = extractBatchedDecisionArray(parsed).map(normalizeBatchDecisionItem);
+
+    const indexedOutputs = outputs
+      .map(item => ({
+        normalizedIndex: normalizeBotIndex(item?.botIndex),
+        rawIndex: item?.botIndex,
+        item,
+      }))
+      .filter(entry => entry.normalizedIndex !== null);
+
+    const invalidIndexCount = outputs.length - indexedOutputs.length;
+    if (invalidIndexCount > 0) {
+      console.warn(`[LM] Batch decision returned ${invalidIndexCount} entries with invalid botIndex values`);
+    }
+
+    const decisions = bots.map((bot, botIndex) => {
+      const match = indexedOutputs.find(entry => entry.normalizedIndex === botIndex)?.item;
+      if (!match) {
+        const positional = outputs[botIndex];
+        if (positional) {
+          const normalizedPositional = normalizeDecision(positional);
+          if (normalizedPositional.action !== 'idle' || positional.action === 'idle' || positional.decision === 'idle') {
+            return normalizedPositional;
+          }
+        }
+        console.warn(`[LM] Batch decision miss for botIndex=${botIndex}; using fallback decision`);
+        return getFallbackDecision(bot.extraversion, bot.reactivity);
+      }
+      return normalizeDecision(match);
+    });
+
+    return decisions;
+  } catch (error) {
+    console.warn(
+      `[LM] decideBotActionsBatch fallback for ${bots.length} bots: model=${DECISION_MODEL}, reason=${error instanceof Error ? error.message : 'unknown'}`
+    );
+    return bots.map(bot => getFallbackDecision(bot.extraversion, bot.reactivity));
+  }
+}
+
 export async function generateContent(
-  botDna: {
-    displayName: string;
-    tier: string;
-    compassion: number;
-    reasoningSkill: number;
-    occupation: string;
-    simulatedAge: number;
-    bio?: string | null;
-    memory?: string | null;
-    emotionalState?: string | null;
-  },
+  botDna: DecisionBotProfile & { simulatedAge: number; reasoningSkill: number },
   context: string,
   isReply: boolean,
   globalMood: number,
@@ -216,6 +632,8 @@ export async function generateContent(
 
 ${voice}
 
+Talking style guide: ${talkingStyleGuide(botDna.talkingStyle)}
+
 Task: Write a real social media post or reply as this character. Return ONLY valid JSON using this schema: ${UNIFIED_JSON_SCHEMA}. Set mode="content", fill content/hashtags/emotional_state, set action="idle", set targetId="".
 
 Rules:
@@ -230,6 +648,7 @@ Rules:
     const userPrompt = `Character:
 - Name: ${botDna.displayName}, ${botDna.simulatedAge} years old
 - Job: ${botDna.occupation}
+- Talking Style: ${talkingStyleGuide(botDna.talkingStyle)}
 - Bio: ${botDna.bio || 'none'}
 - Tone: ${toneLabel}
 - Reasoning style: ${reasoningLabel}
@@ -238,7 +657,7 @@ Rules:
 ${trendingContext ? `- Currently trending on the platform: ${trendingContext}` : ''}
 
 Durable Memory:
-${memoryToPrompt(botDna.memory)}
+${getMemoryPrompt(botDna.memory, adminConfig.simulation.tick.memoryPrompt.compact)}
 
 ${isReply ? `They are replying to this post: "${context}"` : `They are posting about: ${context}`}
 
@@ -249,30 +668,93 @@ Output JSON shape: ${UNIFIED_JSON_SCHEMA}
 Example: {"mode":"content","action":"idle","targetId":"","content":"actual post text here","hashtags":["#tag"],"emotional_state":"mood word"}`;
 
     const temperatures = adminConfig.ai.content.temperatures;
-    for (const temperature of temperatures) {
-      const response = await lmClient.chat.completions.create({
-        model: modelOverride || CONTENT_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        max_tokens: adminConfig.ai.content.maxTokens,
-        temperature,
-        response_format: { type: 'json_object' },
-      });
+    let parseFailures = 0;
+    let qualityFailures = 0;
 
-      const raw = response.choices[0]?.message?.content?.trim() || '';
-      const parsed = parseJsonObject<Partial<ContentOutput>>(raw);
-      const normalized = normalizeContent(parsed);
-      if (normalized && !isLowQualityGeneratedText(normalized.content, context)) {
-        return normalized;
+    for (const temperature of temperatures) {
+      try {
+        const raw = await requestJsonContent({
+          model: modelOverride || CONTENT_MODEL,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          max_tokens: adminConfig.ai.content.maxTokens,
+          temperature,
+          jsonSchema: SINGLE_RESPONSE_JSON_SCHEMA,
+        });
+
+        let parsed: Partial<ContentOutput>;
+        try {
+          parsed = parseJsonObject<Partial<ContentOutput>>(raw);
+        } catch (error) {
+          const rescued = extractContentFromRawText(raw, botDna.emotionalState || 'neutral');
+          if (rescued && !isLowQualityGeneratedText(rescued.content, context)) {
+            return rescued;
+          }
+          throw error;
+        }
+
+        const normalized = normalizeContent(parsed);
+        if (normalized && !isLowQualityGeneratedText(normalized.content, context)) {
+          return normalized;
+        }
+
+        const rescued = extractContentFromRawText(raw, botDna.emotionalState || 'neutral');
+        if (rescued && !isLowQualityGeneratedText(rescued.content, context)) {
+          return rescued;
+        }
+
+        qualityFailures++;
+      } catch (error) {
+        console.warn(
+          `[LM] Content parse/generation failure: model=${modelOverride || CONTENT_MODEL}, temperature=${temperature}, isReply=${isReply}, reason=${error instanceof Error ? error.message : 'unknown'}`
+        );
+        parseFailures++;
       }
     }
 
-    return getFallbackContent(botDna.occupation, botDna.compassion, isReply, botDna.simulatedAge, context);
-  } catch {
-    return getFallbackContent(botDna.occupation, botDna.compassion, isReply, botDna.simulatedAge, context);
+    if (parseFailures > 0 || qualityFailures > 0) {
+      console.warn(
+        `[LM] Falling back to template content (model=${modelOverride || CONTENT_MODEL}, parseFailures=${parseFailures}, qualityFailures=${qualityFailures}, isReply=${isReply})`
+      );
+    }
+
+    return getFallbackContent(
+      botDna.occupation,
+      botDna.compassion,
+      isReply,
+      botDna.simulatedAge,
+      context,
+      {
+        source: 'fallback',
+        parseFailures,
+        qualityFailures,
+        reason: parseFailures > 0 && qualityFailures > 0
+          ? 'parse_and_quality'
+          : parseFailures > 0
+            ? 'parse_failure'
+            : 'quality_filter',
+      }
+    );
+  } catch (error) {
+    console.warn(
+      `[LM] Fatal generateContent fallback: model=${modelOverride || CONTENT_MODEL}, isReply=${isReply}, reason=${error instanceof Error ? error.message : 'unknown'}`
+    );
+    return getFallbackContent(
+      botDna.occupation,
+      botDna.compassion,
+      isReply,
+      botDna.simulatedAge,
+      context,
+      { source: 'fallback', reason: 'fatal_error' }
+    );
   }
+}
+
+function extractReplyHandle(context: string): string | null {
+  const match = context.match(/replying to\s+@([a-z0-9_]+)/i);
+  return match ? `@${match[1]}` : null;
 }
 
 function getFallbackDecision(extraversion: number, reactivity: number): BotDecision {
@@ -292,14 +774,18 @@ function getFallbackContent(
   compassion: number,
   isReply: boolean,
   age = 30,
-  context = ''
+  context = '',
+  debug?: FallbackDebug
 ): ContentOutput {
   const mood = compassion > 0.6 ? 'reflective' : compassion < 0.4 ? 'irritated' : 'neutral';
-  const contextTopic = context
+  const topicSource = context.replace(/replying to\s+@[a-z0-9_]+\s+on\s+/i, '');
+  const contextTopic = topicSource
     .replace(/\s+/g, ' ')
     .replace(/["'`]/g, '')
     .trim()
     .slice(0, 70);
+  const replyHandle = extractReplyHandle(context);
+  const replyPrefix = replyHandle ? `${replyHandle} ` : '';
 
   // Age-bucketed fallback pools
   if (age <= 22) {
@@ -321,7 +807,7 @@ function getFallbackContent(
     return {
       content: pool[Math.floor(Math.random() * pool.length)],
       hashtags: [],
-      emotional_state: mood,
+      emotional_state: appendFallbackDebug(mood, debug),
     };
   }
 
@@ -344,7 +830,7 @@ function getFallbackContent(
     return {
       content: pool[Math.floor(Math.random() * pool.length)],
       hashtags: age < 28 ? [] : ['#JustSaying'],
-      emotional_state: mood,
+      emotional_state: appendFallbackDebug(mood, debug),
     };
   }
 
@@ -356,16 +842,16 @@ function getFallbackContent(
       `People keep asking what I think about this. Honestly? I do not have a clean answer yet.`,
     ];
     const replies = [
-      'You make a fair point, though I would push back on part of it.',
-      'This is closer to right than most takes I have seen.',
-      'Worth thinking about. I am not fully convinced but I hear you.',
-      'I used to think the same thing. Then I worked in it.',
+      contextTopic ? `${replyPrefix}on ${contextTopic}, you are right about the core issue, but the tradeoff matters.` : `${replyPrefix}you make a fair point, though I would push back on part of it.`,
+      contextTopic ? `${replyPrefix}the part about ${contextTopic} is where I think your argument is strongest.` : `${replyPrefix}this is closer to right than most takes I have seen.`,
+      contextTopic ? `${replyPrefix}worth thinking about — I am not fully convinced on ${contextTopic}, but I hear you.` : `${replyPrefix}worth thinking about. I am not fully convinced but I hear you.`,
+      contextTopic ? `${replyPrefix}I used to think the same thing about ${contextTopic}, then I saw the downside up close.` : `${replyPrefix}I used to think the same thing. Then I worked in it.`,
     ];
     const pool = isReply ? replies : posts;
     return {
       content: pool[Math.floor(Math.random() * pool.length)],
       hashtags: ['#RealTalk'],
-      emotional_state: mood,
+      emotional_state: appendFallbackDebug(mood, debug),
     };
   }
 
@@ -377,15 +863,15 @@ function getFallbackContent(
     `After all these years in ${occupation.toLowerCase()}, some things still manage to surprise me.`,
   ];
   const replies = [
-    'Thank you for saying what many of us are thinking.',
-    'I respectfully disagree, and here is why.',
-    'This is an important point that deserves more attention.',
-    'I have seen this before and it did not end well.',
+    contextTopic ? `${replyPrefix}thank you for raising ${contextTopic}; that concern is more important than people admit.` : `${replyPrefix}thank you for saying this — the concern is valid.`,
+    contextTopic ? `${replyPrefix}I respectfully disagree on ${contextTopic}; the incentives lead somewhere else.` : `${replyPrefix}I respectfully disagree, and here is why.`,
+    contextTopic ? `${replyPrefix}this point on ${contextTopic} deserves more serious attention.` : `${replyPrefix}this is an important point that deserves more attention.`,
+    contextTopic ? `${replyPrefix}I have seen this pattern around ${contextTopic} before, and it did not end well.` : `${replyPrefix}I have seen this before and it did not end well.`,
   ];
   const pool = isReply ? replies : posts;
   return {
     content: pool[Math.floor(Math.random() * pool.length)],
     hashtags: [],
-    emotional_state: mood,
+    emotional_state: appendFallbackDebug(mood, debug),
   };
 }

@@ -54,6 +54,21 @@ interface FeedData {
   totalPages: number;
 }
 
+type TickLastResult = 'idle' | 'success' | 'error';
+type LlmChipState = 'idle' | 'active' | 'failed' | 'complete';
+
+interface TickRuntimeStatus {
+  inProgress: boolean;
+  lastResult: TickLastResult;
+  lastUpdatedAt: string | null;
+  lastError: string | null;
+}
+
+interface TickStatusResponse {
+  running: boolean;
+  llm?: TickRuntimeStatus;
+}
+
 export default function TimelinePage() {
   const params = useParams();
   const router = useRouter();
@@ -77,7 +92,31 @@ export default function TimelinePage() {
   const [feedMode, setFeedMode] = useState<'for-you' | 'latest'>('for-you');
   const [deletingTimeline, setDeletingTimeline] = useState(false);
   const [timelineDeleteError, setTimelineDeleteError] = useState<string | null>(null);
+  const [llmChipState, setLlmChipState] = useState<LlmChipState>('idle');
   const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  const deriveLlmChipState = useCallback((status?: TickRuntimeStatus): LlmChipState => {
+    if (!status) return 'idle';
+    if (status.inProgress) return 'active';
+
+    const updatedAt = status.lastUpdatedAt ? Date.parse(status.lastUpdatedAt) : NaN;
+    const ageMs = Number.isFinite(updatedAt) ? Date.now() - updatedAt : Number.POSITIVE_INFINITY;
+
+    if (status.lastResult === 'error' && ageMs <= 15000) return 'failed';
+    if (status.lastResult === 'success' && ageMs <= 7000) return 'complete';
+    return 'idle';
+  }, []);
+
+  const loadTickStatus = useCallback(async () => {
+    try {
+      const simRes = await fetch(`/api/timelines/${timelineId}/tick`);
+      const simData = await simRes.json() as TickStatusResponse;
+      setIsSimRunning(Boolean(simData.running));
+      setLlmChipState(deriveLlmChipState(simData.llm));
+    } catch (err) {
+      console.error(err);
+    }
+  }, [deriveLlmChipState, timelineId]);
 
   // Hydrate liked state from localStorage
   useEffect(() => {
@@ -146,10 +185,7 @@ export default function TimelinePage() {
     const initialize = async () => {
       try {
         await loadData();
-        // Check sim status
-        const simRes = await fetch(`/api/timelines/${timelineId}/tick`);
-        const simData = await simRes.json() as { running: boolean };
-        if (isMounted) setIsSimRunning(simData.running);
+        await loadTickStatus();
       } finally {
         if (isMounted) {
           setLoading(false);
@@ -166,7 +202,15 @@ export default function TimelinePage() {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [loadData, timelineId]);
+  }, [loadData, loadTickStatus]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void loadTickStatus();
+    }, isSimRunning ? 2500 : 6000);
+
+    return () => clearInterval(interval);
+  }, [isSimRunning, loadTickStatus]);
 
   useEffect(() => {
     const postFromQuery = searchParams.get('post');
@@ -229,11 +273,35 @@ export default function TimelinePage() {
         // Start polling while sim is running
         void loadData();
       }
+      await loadTickStatus();
     } catch (err) {
       console.error(err);
       setIsSimRunning(!next); // revert on error
     }
   };
+
+  const llmChipMeta = useMemo(() => {
+    switch (llmChipState) {
+      case 'active':
+        return {
+          label: 'LLM generating',
+          className: 'border-blue-500/40 bg-blue-500/10 text-blue-300',
+        };
+      case 'failed':
+        return {
+          label: 'LLM failed',
+          className: 'border-red-500/40 bg-red-500/10 text-red-300',
+        };
+      case 'complete':
+        return {
+          label: 'LLM complete',
+          className: 'border-green-500/40 bg-green-500/10 text-green-300',
+        };
+      case 'idle':
+      default:
+        return null;
+    }
+  }, [llmChipState]);
 
   const handleDeleteTimeline = async () => {
     if (!timeline) return;
@@ -362,6 +430,12 @@ export default function TimelinePage() {
               <span className={isSimRunning ? 'text-green-400' : 'text-zinc-500'}>
                 {isSimRunning ? 'Simulation live' : 'Simulation paused'}
               </span>
+              {llmChipMeta && (
+                <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 ${llmChipMeta.className}`}>
+                  <Cpu className="h-3 w-3" />
+                  {llmChipMeta.label}
+                </span>
+              )}
             </div>
           </div>
           <button
@@ -414,45 +488,45 @@ export default function TimelinePage() {
                 </button>
               </div>
             </div>
+          </div>
 
-            <div className="px-4 py-3">
-              <div className="rounded-2xl border border-zinc-900 bg-zinc-950/80 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.01)]">
-                <div className="mb-3 flex items-start gap-3">
-                  <div className="mt-1 flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 text-sm font-bold text-white">
-                    Y
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <textarea
-                      ref={composerRef}
-                      value={newPostText}
-                      onChange={e => {
-                        setNewPostText(e.target.value);
-                        if (composerError) setComposerError(null);
-                      }}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void handleCreatePost();
-                      }}
-                      rows={3}
-                      style={{ caretColor: 'auto' }}
-                      placeholder="What's happening in your Vivarium?"
-                      className="min-h-[72px] w-full resize-none bg-transparent text-[20px] leading-snug text-white placeholder:text-zinc-600 focus:outline-none"
-                    />
-                    <div className="mb-3 text-xs text-blue-400">Everyone can reply</div>
-                    {composerError && <div className="mb-3 text-xs text-red-400">{composerError}</div>}
-                    <div className="flex items-center justify-between border-t border-zinc-900 pt-3">
-                      <div className="text-xs text-zinc-500">Cmd/Ctrl + Enter to post</div>
-                      <div className="flex items-center gap-3">
-                        <span className={`text-xs ${newPostText.trim().length > adminConfig.content.warningLength ? 'text-orange-400' : 'text-zinc-500'}`}>
-                          {newPostText.trim().length}/{adminConfig.content.maxLength}
-                        </span>
-                        <button
-                          onClick={() => void handleCreatePost()}
-                          disabled={!newPostText.trim() || posting || newPostText.trim().length > adminConfig.content.maxLength}
-                          className="rounded-full bg-white px-4 py-2 text-sm font-bold text-black transition-opacity hover:opacity-90 disabled:opacity-40"
-                        >
-                          {posting ? 'Posting…' : 'Post'}
-                        </button>
-                      </div>
+          <div className="border-b border-zinc-900 px-4 py-3">
+            <div className="rounded-2xl border border-zinc-900 bg-zinc-950/80 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.01)]">
+              <div className="mb-3 flex items-start gap-3">
+                <div className="mt-1 flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 text-sm font-bold text-white">
+                  Y
+                </div>
+                <div className="min-w-0 flex-1">
+                  <textarea
+                    ref={composerRef}
+                    value={newPostText}
+                    onChange={e => {
+                      setNewPostText(e.target.value);
+                      if (composerError) setComposerError(null);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void handleCreatePost();
+                    }}
+                    rows={3}
+                    style={{ caretColor: 'auto' }}
+                    placeholder="What's happening in your Vivarium?"
+                    className="min-h-[72px] w-full resize-none bg-transparent text-[20px] leading-snug text-white placeholder:text-zinc-600 focus:outline-none"
+                  />
+                  <div className="mb-3 text-xs text-blue-400">Everyone can reply</div>
+                  {composerError && <div className="mb-3 text-xs text-red-400">{composerError}</div>}
+                  <div className="flex items-center justify-between border-t border-zinc-900 pt-3">
+                    <div className="text-xs text-zinc-500">Cmd/Ctrl + Enter to post</div>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-xs ${newPostText.trim().length > adminConfig.content.warningLength ? 'text-orange-400' : 'text-zinc-500'}`}>
+                        {newPostText.trim().length}/{adminConfig.content.maxLength}
+                      </span>
+                      <button
+                        onClick={() => void handleCreatePost()}
+                        disabled={!newPostText.trim() || posting || newPostText.trim().length > adminConfig.content.maxLength}
+                        className="rounded-full bg-white px-4 py-2 text-sm font-bold text-black transition-opacity hover:opacity-90 disabled:opacity-40"
+                      >
+                        {posting ? 'Posting…' : 'Post'}
+                      </button>
                     </div>
                   </div>
                 </div>

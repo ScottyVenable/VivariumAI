@@ -22,6 +22,7 @@ interface BotProfile {
   avatarUrl: string | null;
   tier: string;
   occupation: string;
+  talkingStyle?: string | null;
   simulatedAge: number;
   emotionalState: string | null;
   followerCount: number;
@@ -121,6 +122,11 @@ export function ProfileSheet({
                   <span className="inline-flex items-center gap-1"><UserRound className="h-3.5 w-3.5" />Age {profile.simulatedAge}</span>
                   {profile.emotionalState && <span className="inline-flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" />{profile.emotionalState}</span>}
                 </div>
+                {profile.talkingStyle && (
+                  <div className="mb-3 rounded-xl border border-zinc-900 bg-zinc-950 px-3 py-2 text-xs text-zinc-300">
+                    Talking style: {profile.talkingStyle}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-3 gap-3 text-center text-sm">
                   <div className="rounded-xl border border-zinc-900 bg-zinc-950 px-3 py-2">

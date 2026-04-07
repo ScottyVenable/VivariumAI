@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { sanitizeDisplayContent, sanitizeEmotionalState, sanitizeHashtags } from '@/lib/post-content';
 
 const AUTHOR_SELECT = {
   id: true,
@@ -49,7 +50,9 @@ function buildReplyTree(replies: RawReply[], parentId: string | null): ReplyNode
     .filter(reply => reply.parentId === parentId)
     .map<ReplyNode>(reply => ({
       ...reply,
-      hashtags: parseHashtags(reply.hashtags),
+      content: sanitizeDisplayContent(reply.content),
+      hashtags: sanitizeHashtags(reply.hashtags, reply.content),
+      emotionalState: sanitizeEmotionalState(reply.emotionalState),
       replies: buildReplyTree(replies, reply.id),
     }));
 }
@@ -95,7 +98,9 @@ export async function GET(
 
     return NextResponse.json({
       ...post,
-      hashtags: parseHashtags(post.hashtags),
+      content: sanitizeDisplayContent(post.content),
+      hashtags: sanitizeHashtags(post.hashtags, post.content),
+      emotionalState: sanitizeEmotionalState(post.emotionalState),
       replies: buildReplyTree(allReplies, postId),
     });
   } catch (error) {

@@ -21,16 +21,25 @@ export const adminConfig = {
 
   simulation: {
     tick: {
-      minIntervalMs: 30_000,
-      maxIntervalMs: 60_000,
+      minIntervalMs: 20000,
+      maxIntervalMs: 60000,
       botsPerTickRatio: 0.3,
-      recentPostsToLoad: 20,
+      decisionBatchSize: 6,
+      recentPostsToLoad: 15,
       hotPostsToTrack: 5,
       recentPostsInPrompt: 8,
+      memoryPrompt: {
+        compact: true,
+        topicLimit: 3,
+        peopleLimit: 3,
+        recentLimit: 3,
+        maxItemLength: 48,
+      },
     },
     decision: {
       preferConversationalChance: 0.7,
       preferHotPostChance: 0.8,
+      preferOwnThreadReplyChance: 0.75,
       skipLowSignalScoreThreshold: 1,
       skipLowSignalReactivityThreshold: 0.45,
     },

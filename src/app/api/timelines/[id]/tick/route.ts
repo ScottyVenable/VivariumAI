@@ -1,13 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { runTick, startTickLoop, stopTickLoop, isTickLoopRunning, getActiveTimelineId } from '@/lib/tick';
+import {
+  runTickWithStatus,
+  startTickLoop,
+  stopTickLoop,
+  isTickLoopRunning,
+  getActiveTimelineId,
+  getTickRuntimeStatus,
+} from '@/lib/tick';
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const status = getTickRuntimeStatus(id);
   return NextResponse.json({
     running: isTickLoopRunning() && getActiveTimelineId() === id,
+    llm: status,
   });
 }
 
@@ -30,7 +39,7 @@ export async function POST(
     }
 
     // No body or unknown → run a single manual tick
-    const result = await runTick(id);
+    const result = await runTickWithStatus(id);
     return NextResponse.json(result);
   } catch (err) {
     console.error('Tick error:', err);

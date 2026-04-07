@@ -1,5 +1,5 @@
 import { prisma } from './db';
-import { decideBotAction, generateContent, BotDecision, DECISION_MODEL } from './lmstudio';
+import { decideBotActionsBatch, generateContent, BotDecision } from './lmstudio';
 import { parseBotMemory, remember } from './memory';
 import { adminConfig } from '@config/admin';
 
@@ -43,6 +43,19 @@ function sentimentShift(content: string, fallback: string): string {
   return fallback;
 }
 
+function splitEmotionalStateDebug(value: string): { mood: string; debugSuffix: string } {
+  const [moodRaw, debugRaw] = value.split('||debug:');
+  const mood = moodRaw.trim();
+  if (!debugRaw) return { mood, debugSuffix: '' };
+  return { mood, debugSuffix: `||debug:${debugRaw}` };
+}
+
+function attachEmotionalDebug(mood: string, debugSuffix: string): string {
+  const cleanMood = mood.trim();
+  if (!debugSuffix) return cleanMood;
+  return `${cleanMood}${debugSuffix}`;
+}
+
 type FeedPost = {
   id: string;
   content: string;
@@ -50,6 +63,7 @@ type FeedPost = {
   likeCount: number;
   replyCount: number;
   parentId: string | null;
+  parentAuthorId: string | null;
   author: { username: string; displayName: string; tier: string; isHuman: boolean };
 };
 
@@ -137,6 +151,7 @@ async function ensureAmbientHumans(timelineId: string, desiredCount = 3): Promis
         username: `ambient_${seed}`,
         displayName,
         occupation: 'Viewer',
+        talkingStyle: 'Casual audience tone, short reactions with social-media phrasing',
         bio: 'Ambient audience account',
         memory: '{}',
         reactivity: 0.45,
@@ -291,6 +306,68 @@ export interface TickResult {
   timestamp: Date;
 }
 
+type TickLastResult = 'idle' | 'success' | 'error';
+
+type TickRuntimeState = {
+  inProgressCount: number;
+  lastResult: TickLastResult;
+  lastUpdatedAt: number | null;
+  lastError: string | null;
+};
+
+const tickRuntimeByTimeline = new Map<string, TickRuntimeState>();
+
+function ensureTickRuntimeState(timelineId: string): TickRuntimeState {
+  const existing = tickRuntimeByTimeline.get(timelineId);
+  if (existing) {
+    return existing;
+  }
+
+  const created: TickRuntimeState = {
+    inProgressCount: 0,
+    lastResult: 'idle',
+    lastUpdatedAt: null,
+    lastError: null,
+  };
+  tickRuntimeByTimeline.set(timelineId, created);
+  return created;
+}
+
+export async function runTickWithStatus(timelineId: string): Promise<TickResult> {
+  const state = ensureTickRuntimeState(timelineId);
+  state.inProgressCount += 1;
+
+  try {
+    const result = await runTick(timelineId);
+    state.lastResult = 'success';
+    state.lastUpdatedAt = Date.now();
+    state.lastError = null;
+    return result;
+  } catch (error) {
+    state.lastResult = 'error';
+    state.lastUpdatedAt = Date.now();
+    state.lastError = error instanceof Error ? error.message : 'Tick failed';
+    throw error;
+  } finally {
+    state.inProgressCount = Math.max(0, state.inProgressCount - 1);
+  }
+}
+
+export function getTickRuntimeStatus(timelineId: string): {
+  inProgress: boolean;
+  lastResult: TickLastResult;
+  lastUpdatedAt: string | null;
+  lastError: string | null;
+} {
+  const state = ensureTickRuntimeState(timelineId);
+  return {
+    inProgress: state.inProgressCount > 0,
+    lastResult: state.lastResult,
+    lastUpdatedAt: state.lastUpdatedAt ? new Date(state.lastUpdatedAt).toISOString() : null,
+    lastError: state.lastError,
+  };
+}
+
 export async function runTick(timelineId: string): Promise<TickResult> {
   const tickId = `tick_${Date.now()}`;
   const actions: TickResult['actions'] = [];
@@ -317,6 +394,7 @@ export async function runTick(timelineId: string): Promise<TickResult> {
       compassion: true,
       reasoningSkill: true,
       occupation: true,
+      talkingStyle: true,
       simulatedAge: true,
       emotionalState: true,
       humanSentiment: true,
@@ -342,11 +420,19 @@ export async function runTick(timelineId: string): Promise<TickResult> {
       likeCount: true,
       replyCount: true,
       parentId: true,
+      parent: {
+        select: {
+          authorId: true,
+        },
+      },
       author: { select: { username: true, displayName: true, tier: true, isHuman: true } },
     },
   });
 
-  const feedPosts: FeedPost[] = recentPosts;
+  const feedPosts: FeedPost[] = recentPosts.map(post => ({
+    ...post,
+    parentAuthorId: post.parent?.authorId ?? null,
+  }));
 
   // Derive trending hashtags and hot posts from engagement signals
   const trendingTags = extractTrending(feedPosts);
@@ -373,9 +459,29 @@ export async function runTick(timelineId: string): Promise<TickResult> {
       ? `"${feedPosts[0].content.slice(0, 80)}" (and similar things being talked about)`
       : 'what is on their mind';
 
+  const decisionBatchSize = Math.max(1, adminConfig.simulation.tick.decisionBatchSize);
+  const botDecisions = new Map<string, BotDecision>();
+
+  for (let i = 0; i < awakeBots.length; i += decisionBatchSize) {
+    const batch = awakeBots.slice(i, i + decisionBatchSize);
+    try {
+      const decisions = await decideBotActionsBatch(batch, recentPostsContext, timeline.globalMood);
+      decisions.forEach((decision, index) => {
+        const bot = batch[index];
+        if (bot) {
+          botDecisions.set(bot.id, decision);
+        }
+      });
+    } catch {
+      for (const bot of batch) {
+        botDecisions.set(bot.id, { action: 'idle' });
+      }
+    }
+  }
+
   for (const bot of awakeBots) {
     try {
-      const decision = await decideBotAction(bot, recentPostsContext, timeline.globalMood);
+      const decision = botDecisions.get(bot.id) ?? { action: 'idle' };
       const result = await executeAction(
         bot, decision, timelineId, feedPosts, hotPosts, conversationalPosts,
         timeline.globalMood, newPostContext, trendingContext
@@ -388,7 +494,7 @@ export async function runTick(timelineId: string): Promise<TickResult> {
         postId: result?.postId,
       });
     } catch (err) {
-      console.error(`Tick error for bot ${bot.username}:`, err);
+      console.error(`Tick error for bot ${bot.username} (decision=${botDecisions.get(bot.id)?.action ?? 'unknown'}):`, err);
     }
   }
 
@@ -418,6 +524,7 @@ export async function runTick(timelineId: string): Promise<TickResult> {
 async function executeAction(
   bot: {
     id: string;
+    username: string;
     displayName: string;
     bio: string | null;
     memory?: string | null;
@@ -425,6 +532,7 @@ async function executeAction(
     compassion: number;
     reasoningSkill: number;
     occupation: string;
+    talkingStyle?: string | null;
     simulatedAge: number;
     emotionalState?: string | null;
     reactivity: number;
@@ -448,16 +556,16 @@ async function executeAction(
         postContext,
         false,
         globalMood,
-        trendingContext,
-        DECISION_MODEL
+        trendingContext
       );
+      const outputState = splitEmotionalStateDebug(output.emotional_state);
       
       const rememberedTopic = output.hashtags[0] || postContext.slice(0, 48);
       const post = await prisma.post.create({
         data: {
           content: output.content,
           hashtags: JSON.stringify(output.hashtags),
-          emotionalState: output.emotional_state,
+          emotionalState: attachEmotionalDebug(outputState.mood, outputState.debugSuffix),
           authorId: bot.id,
           timelineId,
         },
@@ -466,7 +574,7 @@ async function executeAction(
       await prisma.bot.update({
         where: { id: bot.id },
         data: {
-          emotionalState: output.emotional_state,
+          emotionalState: outputState.mood,
           memory: remember(bot.memory, {
             topic: rememberedTopic,
             event: `Posted about ${rememberedTopic}`,
@@ -484,8 +592,15 @@ async function executeAction(
         ? recentPosts.find(p => p.id === decision.targetId)
         : undefined;
 
+      const ownThreadReplies = conversationalPosts.filter(post => post.parentAuthorId === bot.id && post.author.username !== bot.username);
+
       if (!target) {
-        if (Math.random() < adminConfig.simulation.decision.preferConversationalChance && conversationalPosts.length > 0) {
+        if (
+          ownThreadReplies.length > 0 &&
+          Math.random() < Math.min(0.95, adminConfig.simulation.decision.preferOwnThreadReplyChance * Math.max(0.2, bot.reactivity))
+        ) {
+          target = weightedPick(ownThreadReplies);
+        } else if (Math.random() < adminConfig.simulation.decision.preferConversationalChance && conversationalPosts.length > 0) {
           target = weightedPick(conversationalPosts);
         } else if (Math.random() < adminConfig.simulation.decision.preferHotPostChance && hotPosts.length > 0) {
           target = weightedPick(hotPosts);
@@ -519,20 +634,21 @@ async function executeAction(
         `Replying to @${target.author.username} on ${summarizeTopic(target)}: ${target.content}`,
         true,
         globalMood,
-        trendingContext,
-        DECISION_MODEL
+        trendingContext
       );
       const ancestorIds = await getAncestorIds(target.id);
+      const outputState = splitEmotionalStateDebug(output.emotional_state);
 
       // Emotional contagion: bot is slightly influenced by what it replies to
-      const shiftedMood = sentimentShift(target.content, output.emotional_state);
+      const shiftedMood = sentimentShift(target.content, outputState.mood);
+      const shiftedWithDebug = attachEmotionalDebug(shiftedMood, outputState.debugSuffix);
       const topic = output.hashtags[0] || summarizeTopic(target);
 
       const post = await prisma.post.create({
         data: {
           content: output.content,
           hashtags: JSON.stringify(output.hashtags),
-          emotionalState: shiftedMood,
+          emotionalState: shiftedWithDebug,
           authorId: bot.id,
           timelineId,
           parentId: target.id,
@@ -666,6 +782,11 @@ async function executeAction(
 
 let tickInterval: ReturnType<typeof setTimeout> | null = null;
 let activeTimelineId: string | null = null;
+// Monotonically increasing generation counter. Each startTickLoop() call
+// bumps this; stopTickLoop() also bumps it. Any in-flight async callback
+// that sees a stale generation aborts before re-scheduling, eliminating
+// orphaned timers and duplicate loops after a stop/switch mid-tick.
+let currentLoopGeneration = 0;
 
 export function isTickLoopRunning(): boolean {
   return tickInterval !== null;
@@ -676,6 +797,10 @@ export function getActiveTimelineId(): string | null {
 }
 
 export function startTickLoop(timelineId: string): void {
+  // Invalidate any currently in-flight tick callback.
+  currentLoopGeneration++;
+  const loopGeneration = currentLoopGeneration;
+
   if (tickInterval) {
     clearTimeout(tickInterval);
   }
@@ -685,15 +810,21 @@ export function startTickLoop(timelineId: string): void {
     const nextInterval = getRandomTickIntervalMs();
 
     tickInterval = setTimeout(async () => {
-      if (activeTimelineId) {
-        try {
-          await runTick(activeTimelineId);
-          console.log(`[TICK] Completed tick for timeline ${activeTimelineId}`);
-        } catch (err) {
-          console.error('[TICK] Error during tick:', err);
-        }
-        scheduleNextTick();
+      // Guard: bail out if stop() or a new start() was called while we waited.
+      if (loopGeneration !== currentLoopGeneration || !activeTimelineId) return;
+
+      try {
+        await runTickWithStatus(activeTimelineId);
+        console.log(`[TICK] Completed tick for timeline ${activeTimelineId}`);
+      } catch (err) {
+        console.error('[TICK] Error during tick:', err);
       }
+
+      // Guard again after the async work: stop/switch could have happened
+      // during the await, so re-check before scheduling the next interval.
+      if (loopGeneration !== currentLoopGeneration || !activeTimelineId) return;
+
+      scheduleNextTick();
     }, nextInterval);
   };
 
@@ -705,6 +836,9 @@ export function startTickLoop(timelineId: string): void {
 }
 
 export function stopTickLoop(): void {
+  // Bump the generation so any in-flight tick callback self-aborts after its
+  // current await resolves, even if clearTimeout already fired too late.
+  currentLoopGeneration++;
   if (tickInterval) {
     clearTimeout(tickInterval);
     tickInterval = null;

@@ -37,6 +37,7 @@ model Bot {
   
   simulatedAge   Int      @default(25)
   occupation     String   @default("Digital Citizen")
+  talkingStyle   String   @default("Balanced social tone with clear, conversational phrasing")
   netWorth       Float    @default(1000.0)
   
   emotionalState String?

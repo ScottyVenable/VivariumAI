@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { sanitizeDisplayContent, sanitizeEmotionalState, sanitizeHashtags } from '@/lib/post-content';
 
 export async function GET(
   req: NextRequest,
@@ -37,7 +38,9 @@ export async function GET(
   return NextResponse.json({
     posts: posts.map(p => ({
       ...p,
-      hashtags: JSON.parse(p.hashtags) as string[],
+      content: sanitizeDisplayContent(p.content),
+      hashtags: sanitizeHashtags(p.hashtags, p.content),
+      emotionalState: sanitizeEmotionalState(p.emotionalState),
     })),
     total,
     page,
