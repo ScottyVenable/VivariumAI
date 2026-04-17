@@ -44,17 +44,27 @@ interface PostCardProps {
   onOpen?: (postId: string) => void;
   onShare?: (postId: string) => void;
   onOpenProfile?: (botId: string) => void;
+  onMentionClick?: (username: string) => void;
   isReply?: boolean;
   className?: string;
 }
 
-export function renderMentions(text: string) {
-  const parts = text.split(/(@\w+)/g);
+export function renderMentions(text: string, onMentionClick?: (username: string) => void) {
+  // Match @username, @username_suffix, and @username.suffix (period-separated usernames)
+  // The (?:\.\w+)* part ensures trailing periods (end of sentence) are NOT consumed
+  const parts = text.split(/(@\w+(?:\.\w+)*)/g);
   return parts.map((part, i) =>
     part.startsWith('@') ? (
-      <span key={i} className="text-blue-400 hover:underline cursor-pointer font-medium">
+      <button
+        key={i}
+        onClick={() => {
+          const username = part.substring(1); // Remove @
+          onMentionClick?.(username);
+        }}
+        className="cursor-pointer font-medium text-blue-400 transition-colors hover:text-blue-300 hover:underline"
+      >
         {part}
-      </span>
+      </button>
     ) : (
       <span key={i}>{part}</span>
     )
@@ -126,6 +136,7 @@ export function PostCard({
   onOpen,
   onShare,
   onOpenProfile,
+  onMentionClick,
   isReply = false,
   className,
 }: PostCardProps) {
@@ -149,7 +160,7 @@ export function PostCard({
         if (debugTooltip) setDebugTooltip(null);
       }}
       className={cn(
-        'border-b border-zinc-900 bg-black px-4 py-3 transition-colors hover:bg-zinc-950 cursor-pointer select-none',
+        'group cursor-pointer select-none rounded-xl border border-zinc-800 bg-black p-4 text-left transition hover:bg-zinc-950',
         isReply && 'bg-zinc-950',
         className
       )}
@@ -167,7 +178,7 @@ export function PostCard({
             <Avatar
               src={post.author.avatarUrl}
               alt={post.author.displayName}
-              size={40}
+              size={44}
             />
           </button>
           {isReply && <div className="w-px flex-1 bg-zinc-800 mt-1 min-h-[8px]" />}
@@ -176,48 +187,46 @@ export function PostCard({
         {/* Content column */}
         <div className="flex-1 min-w-0 pb-1">
           {/* Header row */}
-          <div className="flex items-baseline gap-1.5 flex-wrap leading-none mb-1">
-            <span className="font-bold text-[15px] text-white">
-              <button
-                onClick={e => {
-                  e.stopPropagation();
-                  onOpenProfile?.(post.author.id);
-                }}
-                className="hover:underline"
-              >
-                {post.author.displayName}
-              </button>
-            </span>
+          <div className="mb-1 flex flex-wrap items-center gap-2 text-sm">
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                onOpenProfile?.(post.author.id);
+              }}
+              className="font-semibold text-white hover:underline"
+            >
+              {post.author.displayName}
+            </button>
             <TierBadge tier={post.author.tier} />
             <button
               onClick={e => {
                 e.stopPropagation();
                 onOpenProfile?.(post.author.id);
               }}
-              className="text-zinc-500 text-[14px] hover:underline"
+              className="text-xs text-zinc-500 transition hover:text-white"
             >
               @{post.author.username}
             </button>
-            <span className="text-zinc-700 text-xs">·</span>
-            <span className="text-zinc-500 text-xs">{timeAgo}</span>
+            <span className="text-zinc-600 text-xs">· {timeAgo}</span>
           </div>
 
-          {/* Occupation */}
-          <div className="text-zinc-500 text-xs mb-1.5">{post.author.occupation}</div>
+          <div className="mb-2 text-xs text-zinc-500">
+            {post.author.occupation}
+          </div>
 
           {/* Post content with @mention rendering */}
-          <p className="text-[15px] text-zinc-100 leading-snug whitespace-pre-wrap break-words mb-2">
-            {renderMentions(post.content)}
+          <p className="mb-3 whitespace-pre-wrap break-words text-[15px] leading-relaxed text-zinc-100">
+            {renderMentions(post.content, onMentionClick)}
           </p>
 
           {/* Hashtags */}
           {post.hashtags.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-2">
+            <div className="mb-3 flex flex-wrap gap-2">
               {post.hashtags.map(tag => (
                 <span
                   key={tag}
                   onClick={e => e.stopPropagation()}
-                  className="text-blue-400 text-sm hover:underline cursor-pointer"
+                  className="cursor-pointer text-sm text-blue-400 hover:underline"
                 >
                   {tag}
                 </span>
@@ -227,7 +236,7 @@ export function PostCard({
 
           {/* Emotional state */}
           {moodLabel && (
-            <div className="mb-2 inline-flex rounded-full border border-zinc-800 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-500">
+            <div className="mb-3 inline-flex rounded-full border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-400">
               mood: {moodLabel}
             </div>
           )}
@@ -312,29 +321,25 @@ export function PostCard({
           )}
 
           {/* Action bar */}
-          <div className="flex items-center gap-5 mt-1 text-zinc-500 text-sm">
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-zinc-400">
             <button
               onClick={e => { e.stopPropagation(); onOpen?.(post.id); }}
-              className="group flex items-center gap-1.5 hover:text-blue-400 transition-colors"
+              className="group inline-flex items-center gap-1 text-sm transition hover:text-blue-400"
             >
-              <span className="p-1.5 rounded-full group-hover:bg-blue-400/10 transition-colors">
-                <MessageCircle className="w-[18px] h-[18px]" />
-              </span>
+              <MessageCircle className="h-4 w-4" />
               {post.replyCount > 0 && <span>{post.replyCount}</span>}
             </button>
 
             <button
               onClick={e => { e.stopPropagation(); onLike?.(post.id); }}
               className={cn(
-                'group flex items-center gap-1.5 transition-colors',
-                liked ? 'text-red-500' : 'hover:text-red-500'
+                'inline-flex items-center gap-1 text-sm transition',
+                liked ? 'text-red-400' : 'hover:text-red-400'
               )}
             >
-              <span className="p-1.5 rounded-full group-hover:bg-red-500/10 transition-colors">
-                <Heart
-                  className={cn('w-[18px] h-[18px] transition-all', liked && 'fill-red-500 text-red-500')}
-                />
-              </span>
+              <Heart
+                className={cn('h-4 w-4 transition', liked && 'fill-red-400 text-red-400')}
+              />
               {post.likeCount > 0 && <span>{post.likeCount}</span>}
             </button>
 
@@ -343,17 +348,15 @@ export function PostCard({
                 e.stopPropagation();
                 onShare?.(post.id);
               }}
-              className="group flex items-center hover:text-blue-400 transition-colors"
+              className="inline-flex items-center gap-1 text-sm transition hover:text-blue-400"
             >
-              <span className="p-1.5 rounded-full group-hover:bg-blue-400/10 transition-colors">
-                <Share2 className="w-[18px] h-[18px]" />
-              </span>
+              <Share2 className="h-4 w-4" />
             </button>
 
             {post.replyCount > 0 && (
               <button
                 onClick={e => { e.stopPropagation(); onOpen?.(post.id); }}
-                className="ml-auto text-xs text-zinc-500 transition-colors hover:text-blue-400"
+                className="ml-auto text-xs font-medium text-zinc-400 transition hover:text-white"
               >
                 View thread
               </button>

@@ -1,6 +1,6 @@
 param(
   [int]$Port = 3000,
-  [string]$BindHost = '192.168.4.47',
+  [string]$BindHost = '192.168.40.211', # Or 192.168.40.211 when at clients home, 192.168.4.47 at HOME THIS IS PRIVATE IP ADDRESS, DO NOT EXPOSE TO PUBLIC
   [string]$LmStudioUrl = 'http://192.168.79.1:1234/v1'
 )
 

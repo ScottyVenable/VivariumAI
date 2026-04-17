@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getOrCreateHumanActor } from '@/lib/human-actor';
+import { getOrCreateHumanActor } from '@/lib/bots/human-actor';
 import { adminConfig } from '@config/admin';
 
 const AUTHOR_SELECT = {

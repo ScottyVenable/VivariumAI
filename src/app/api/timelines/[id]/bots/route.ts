@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { generateBots } from '@/lib/bot-generator';
+import { generateBots } from '@/lib/bots/bot-generator';
 import { isBotTier, isObject, parseBoundedInt, parseString } from '@/lib/validation';
 
 export async function GET(

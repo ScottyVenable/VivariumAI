@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { memoryToPrompt } from './memory';
+import { memoryToPrompt, parseBotMemory } from './memory';
 import { adminConfig } from '@config/admin';
 
 const LM_STUDIO_BASE_URL = process.env.LM_STUDIO_URL || 'http://localhost:1234/v1';
@@ -331,11 +331,11 @@ function extractContentFromRawText(raw: string, fallbackMood = 'neutral'): Conte
   const hashtagFieldMatch = collapsed.match(/["']?hashtags["']?\s*[:=]\s*\[([^\]]*)\]/i);
 
   const contentCandidate = contentFieldMatch?.[1] ?? collapsed;
-  const content = contentCandidate
+  const content = polishGeneratedText(contentCandidate
     .replace(/^content\s*:\s*/i, '')
     .replace(/^"|"$/g, '')
     .replace(/\s*[}\]]\s*$/g, '')
-    .trim();
+    .trim());
 
   if (!content || content.length > adminConfig.content.maxLength) {
     return null;
@@ -357,6 +357,33 @@ function extractContentFromRawText(raw: string, fallbackMood = 'neutral'): Conte
     hashtags,
     emotional_state: emotionalState,
   };
+}
+
+function polishGeneratedText(value: string): string {
+  let text = value.replace(/\s+/g, ' ').trim();
+
+  text = text.replace(/(@[a-z0-9_]+)(\s+\1)+/gi, '$1');
+  text = text.replace(/\bon\s+(@[a-z0-9_]+)(?:\s+@[a-z0-9_]+)+/gi, 'on $1');
+
+  text = text
+    .replace(/\b(what|that|it|here|there|who|he|she)\s+s\b/gi, "$1's")
+    .replace(/\b(i|you|we|they)\s+re\b/gi, "$1're")
+    .replace(/\b(i|you|we|they)\s+ve\b/gi, "$1've");
+
+  return text;
+}
+
+function extractFallbackTopic(context: string): string {
+  const topicSource = context.replace(/replying to\s+@[a-z0-9_]+\s+on\s+/i, '');
+  const beforeBody = topicSource.split(':')[0] ?? topicSource;
+
+  return beforeBody
+    .replace(/@[a-z0-9_]+/gi, '')
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 70);
 }
 
 function maybeUnwrapEmbeddedContent(content: string, fallbackMood: string): ContentOutput | null {
@@ -423,7 +450,7 @@ function normalizeDecision(
 }
 
 function normalizeContent(input: Partial<ContentOutput> | null | undefined): ContentOutput | null {
-  const content = typeof input?.content === 'string' ? input.content.trim() : '';
+  const content = typeof input?.content === 'string' ? polishGeneratedText(input.content) : '';
   const emotionalState = typeof input?.emotional_state === 'string'
     ? input.emotional_state.trim()
     : '';
@@ -477,7 +504,21 @@ export async function decideBotAction(
   globalMood: number
 ): Promise<BotDecision> {
   try {
-    const systemPrompt = `${MASTER_SYSTEM_PROMPT}\n\nTask: Choose the bot's next social action. Return ONLY valid JSON using this single shared schema: ${UNIFIED_JSON_SCHEMA}. Set mode="decision".\n\nIf action is post or reply, ALSO generate the actual post/reply text in content, plus hashtags and emotional_state, in the same JSON object.\nIf action is like, follow, or idle, leave content/emotional_state as empty strings and hashtags as an empty array.\n\nDecision priorities:\n- Prefer reply when there is an active human post, human reply, emotionally charged thread, or fast-growing conversation worth joining.\n- Prefer replying to replies/comments when they feel conversational or provocative enough to keep a thread alive.\n- Reuse recurring interests and people from Durable Memory so the profile feels consistent over time.\n- If a remembered person appears again, the bot should be more likely to notice, reply, like, or follow them.\n- Prefer idle when the feed is low-signal, repetitive, or nothing feels worth engaging with.\n- Prefer post only when the bot has a distinct angle or the timeline needs a fresh take.\n- Use targetId whenever replying, liking, or following.`;
+    // Check which known contacts from memory appear in the current feed
+    const parsedMemory = parseBotMemory(botDna.memory);
+    const activeContacts = parsedMemory.people
+      .filter(person => recentPostsContext.includes(person.replace('@', '')))
+      .slice(0, 3);
+    const contactHint = activeContacts.length > 0
+      ? `\n- Known contacts active in this feed: ${activeContacts.join(', ')} — consider engaging with them.`
+      : '';
+    const emotionalStateHint = /\b(angry|furious|excited|anxious|scared|passionate)\b/i.test(botDna.emotionalState || '')
+      ? '\n- This bot is in a highly emotional state — they are more likely to reply or engage.'
+      : /\b(calm|reflective|analytical|thoughtful|content)\b/i.test(botDna.emotionalState || '')
+        ? '\n- This bot is calm and reflective — they may prefer posting an original take or staying idle.'
+        : '';
+
+    const systemPrompt = `${MASTER_SYSTEM_PROMPT}\n\nTask: Choose the bot's next social action. Return ONLY valid JSON using this single shared schema: ${UNIFIED_JSON_SCHEMA}. Set mode="decision".\n\nIf action is post or reply, ALSO generate the actual post/reply text in content, plus hashtags and emotional_state, in the same JSON object.\nIf action is like, follow, or idle, leave content/emotional_state as empty strings and hashtags as an empty array.\n\nDecision priorities:\n- Prefer a balanced mix of reply and post actions across a timeline session.\n- Prefer reply when there is an active human post, emotionally charged thread, or fast-growing conversation worth joining.\n- Prefer replying to replies/comments when they feel conversational or provocative enough to keep a thread alive.\n- Reuse recurring interests and people from Durable Memory so the profile feels consistent over time.\n- If a remembered person appears again in the feed, the bot should be more likely to notice, reply, like, or follow them.\n- Prefer idle when the feed is low-signal, repetitive, or nothing feels worth engaging with.\n- Prefer post when the timeline is becoming reply-heavy, or the bot has a distinct angle, or the timeline needs a fresh take.\n- Use targetId whenever replying, liking, or following.${contactHint}${emotionalStateHint}`;
 
     const userPrompt = `Bot Profile:
 - Name: ${botDna.displayName}
@@ -532,12 +573,19 @@ export async function decideBotActionsBatch(
 ): Promise<BotDecision[]> {
   if (bots.length === 0) return [];
 
-  const systemPrompt = `${MASTER_SYSTEM_PROMPT}\n\nTask: Given a shared timeline context and a list of bot profiles, choose one action for each bot. Return ONLY a JSON object with this shape: {"decisions":[{"botIndex":0,"action":"post|reply|like|follow|idle","targetId":""}]}.\n\nDecision priorities:\n- Prefer reply when a thread is active, especially if a bot is responding to comments beneath its own posts.\n- Prefer reply for highly reactive bots and when memory references recurring people/topics in-context.\n- Prefer like/follow when engagement is useful but no strong text response is needed.\n- Prefer idle for low-signal feed moments.\n- Include targetId whenever action is reply/like/follow and a suitable target exists in context.`;
+  const systemPrompt = `${MASTER_SYSTEM_PROMPT}\n\nTask: Given a shared timeline context and a list of bot profiles, choose one action for each bot. Return ONLY a JSON object with this shape: {"decisions":[{"botIndex":0,"action":"post|reply|like|follow|idle","targetId":""}]}.\n\nDecision priorities:\n- Keep a healthy mix of posts, replies, likes, and follows — avoid making everyone reply to the same post.\n- Prefer reply for bots whose mood is angry, excited, or passionate, or whose memory contains people/topics referenced in the current feed.\n- Prefer post for bots in calm, reflective, or analytical moods, or when the timeline needs fresh angles.\n- If a bot's memory.people contains a name that appears in the feed (e.g., "@alice"), strongly consider having them reply to or like that person.\n- Prefer like/follow for quieter or introverted bots (low extraversion) when a strong reply isn't warranted.\n- Prefer idle when the feed is repetitive, low-signal, or a bot has nothing natural to contribute.\n- Assign targetId to any specific post id from context whenever the action is reply, like, or follow.\n- Avoid clustering: do not guess all bots toward the same post or the same action.`;
 
   const compactProfiles = bots
     .map((bot, index) => {
       const memory = getMemoryPrompt(bot.memory, true);
-      return [
+      const parsedMemory = parseBotMemory(bot.memory);
+
+      // Check which known contacts from this bot's memory appear in the current feed
+      const activeContacts = parsedMemory.people
+        .filter(person => recentPostsContext.includes(person.replace('@', '')))
+        .slice(0, 3);
+
+      const lines = [
         `- botIndex: ${index}`,
         `  name: ${bot.displayName}`,
         `  tier: ${bot.tier}`,
@@ -547,7 +595,13 @@ export async function decideBotActionsBatch(
         `  mood: ${bot.emotionalState || 'neutral'}`,
         `  dna: reactivity=${bot.reactivity}, extraversion=${bot.extraversion}, compassion=${bot.compassion}, reasoning=${bot.reasoningSkill ?? 0.5}`,
         `  memory: ${memory}`,
-      ].join('\n');
+      ];
+
+      if (activeContacts.length > 0) {
+        lines.push(`  known-contacts-in-feed: ${activeContacts.join(', ')} — this bot may want to engage with them`);
+      }
+
+      return lines.join('\n');
     })
     .join('\n\n');
 
@@ -627,6 +681,20 @@ export async function generateContent(
   const reasoningLabel = botDna.reasoningSkill > 0.65 ? 'logical and structured' : botDna.reasoningSkill < 0.35 ? 'emotional and reactive' : 'mixed';
   const atmosphere = globalMood > 0.6 ? 'positive and united' : globalMood < 0.4 ? 'tense and divisive' : 'calm but uncertain';
 
+  // Pick a random format nudge to vary post styles across bots and ticks
+  const FORMAT_HINTS = [
+    null, null, null, // 3-in-9 chance of no hint (pure natural voice)
+    'Ask a genuine follow-up question or pose the thing everyone is dancing around.',
+    'State a blunt or unpopular opinion. Be direct, not diplomatic.',
+    'Share a short personal angle or story that connects to this topic.',
+    'Push back or disagree with something in the context — respectfully or not.',
+    'Respond with dry wit, irony, or humor. Keep it brief.',
+    'Connect this to something bigger or make an unexpected observation.',
+  ];
+  const formatHint = FORMAT_HINTS[Math.floor(Math.random() * FORMAT_HINTS.length)];
+
+  const isThreadContext = context.startsWith('Thread context:');
+
   try {
     const systemPrompt = `${MASTER_SYSTEM_PROMPT}
 
@@ -637,13 +705,15 @@ Talking style guide: ${talkingStyleGuide(botDna.talkingStyle)}
 Task: Write a real social media post or reply as this character. Return ONLY valid JSON using this schema: ${UNIFIED_JSON_SCHEMA}. Set mode="content", fill content/hashtags/emotional_state, set action="idle", set targetId="".
 
 Rules:
-- Write the post content itself, not a description of a post.
-- Sound like a real person at this age posting on social media.
-- Do NOT start with "As a [job]..." or any narration.
-- Keep it short (1-3 sentences max). Authentic. Imperfect if age-appropriate.
-- Hashtags should feel natural and era-appropriate for this age group (0-3 max).
-- Be specific to the provided topic/thread. Avoid vague filler takes.
-- Do not output generic engagement bait or repeated template phrasing.`;
+- Write the post content itself — not a description of what to post.
+- Sound like a real person at this age posting on social media. Not a chatbot, not a narrator.
+- Do NOT start with "As a [job]..." or any self-referential framing.
+- Keep it short (1–3 sentences). Authentic. Imperfect punctuation is fine if age-appropriate.
+- Hashtags: 0–3 max, only if they feel natural for this character's age group.
+- Be specific to the actual topic or thread. No vague meta-commentary on "the discourse."
+- Each post should feel distinct: vary sentence length, energy, and approach.
+- If someone is tagged by @username in the context, address them naturally if relevant.
+- Never use: "this is wild", "not enough people are saying this", "came for the comments", "the discourse", "just saying", "I can't be the only one", "we need to talk about", "unpopular opinion but", "hot take:", "lowkey kinda", "rent free", "living for this", "society when", "did anyone else notice", "nobody is talking about this", "period", "the way that".`;
 
     const userPrompt = `Character:
 - Name: ${botDna.displayName}, ${botDna.simulatedAge} years old
@@ -655,14 +725,18 @@ Rules:
 - Current mood: ${botDna.emotionalState || 'neutral'}
 - Platform atmosphere right now: ${atmosphere}
 ${trendingContext ? `- Currently trending on the platform: ${trendingContext}` : ''}
+${formatHint ? `- Format nudge for this post: ${formatHint}` : ''}
 
-Durable Memory:
+Durable Memory (use this to stay consistent and reference past people/topics naturally):
 ${getMemoryPrompt(botDna.memory, adminConfig.simulation.tick.memoryPrompt.compact)}
 
-${isReply ? `They are replying to this post: "${context}"` : `They are posting about: ${context}`}
+${isThreadContext
+  ? context
+  : isReply
+    ? `They are replying to this post:\n"${context}"`
+    : `They are posting about: ${context}`}
 
-Write what they would literally type and post. Sound like a real ${botDna.simulatedAge}-year-old. Be specific — reference the actual topic, not generic thoughts.
-Avoid generic phrases like "this is wild", "not enough people are saying this", "came for the comments", "the discourse".
+Write exactly what ${botDna.displayName} would type and post. Sound like a real ${botDna.simulatedAge}-year-old with this background. Be specific and genuine — not generic. If their memory references people or topics relevant here, let that show naturally.
 
 Output JSON shape: ${UNIFIED_JSON_SCHEMA}
 Example: {"mode":"content","action":"idle","targetId":"","content":"actual post text here","hashtags":["#tag"],"emotional_state":"mood word"}`;
@@ -752,11 +826,6 @@ Example: {"mode":"content","action":"idle","targetId":"","content":"actual post 
   }
 }
 
-function extractReplyHandle(context: string): string | null {
-  const match = context.match(/replying to\s+@([a-z0-9_]+)/i);
-  return match ? `@${match[1]}` : null;
-}
-
 function getFallbackDecision(extraversion: number, reactivity: number): BotDecision {
   const rand = Math.random();
   const postChance = extraversion * 0.4;
@@ -778,14 +847,7 @@ function getFallbackContent(
   debug?: FallbackDebug
 ): ContentOutput {
   const mood = compassion > 0.6 ? 'reflective' : compassion < 0.4 ? 'irritated' : 'neutral';
-  const topicSource = context.replace(/replying to\s+@[a-z0-9_]+\s+on\s+/i, '');
-  const contextTopic = topicSource
-    .replace(/\s+/g, ' ')
-    .replace(/["'`]/g, '')
-    .trim()
-    .slice(0, 70);
-  const replyHandle = extractReplyHandle(context);
-  const replyPrefix = replyHandle ? `${replyHandle} ` : '';
+  const contextTopic = extractFallbackTopic(context);
 
   // Age-bucketed fallback pools
   if (age <= 22) {
@@ -805,7 +867,7 @@ function getFallbackContent(
     ];
     const pool = isReply ? replies : posts;
     return {
-      content: pool[Math.floor(Math.random() * pool.length)],
+      content: polishGeneratedText(pool[Math.floor(Math.random() * pool.length)]),
       hashtags: [],
       emotional_state: appendFallbackDebug(mood, debug),
     };
@@ -828,7 +890,7 @@ function getFallbackContent(
     ];
     const pool = isReply ? replies : posts;
     return {
-      content: pool[Math.floor(Math.random() * pool.length)],
+      content: polishGeneratedText(pool[Math.floor(Math.random() * pool.length)]),
       hashtags: age < 28 ? [] : ['#JustSaying'],
       emotional_state: appendFallbackDebug(mood, debug),
     };
@@ -842,14 +904,14 @@ function getFallbackContent(
       `People keep asking what I think about this. Honestly? I do not have a clean answer yet.`,
     ];
     const replies = [
-      contextTopic ? `${replyPrefix}on ${contextTopic}, you are right about the core issue, but the tradeoff matters.` : `${replyPrefix}you make a fair point, though I would push back on part of it.`,
-      contextTopic ? `${replyPrefix}the part about ${contextTopic} is where I think your argument is strongest.` : `${replyPrefix}this is closer to right than most takes I have seen.`,
-      contextTopic ? `${replyPrefix}worth thinking about — I am not fully convinced on ${contextTopic}, but I hear you.` : `${replyPrefix}worth thinking about. I am not fully convinced but I hear you.`,
-      contextTopic ? `${replyPrefix}I used to think the same thing about ${contextTopic}, then I saw the downside up close.` : `${replyPrefix}I used to think the same thing. Then I worked in it.`,
+      contextTopic ? `On ${contextTopic}, you are right about the core issue, but the tradeoff matters.` : `You make a fair point, though I would push back on part of it.`,
+      contextTopic ? `The part about ${contextTopic} is where I think your argument is strongest.` : `This is closer to right than most takes I have seen.`,
+      contextTopic ? `Worth thinking about — I am not fully convinced on ${contextTopic}, but I hear you.` : `Worth thinking about. I am not fully convinced but I hear you.`,
+      contextTopic ? `I used to think the same thing about ${contextTopic}, then I saw the downside up close.` : `I used to think the same thing. Then I worked in it.`,
     ];
     const pool = isReply ? replies : posts;
     return {
-      content: pool[Math.floor(Math.random() * pool.length)],
+      content: polishGeneratedText(pool[Math.floor(Math.random() * pool.length)]),
       hashtags: ['#RealTalk'],
       emotional_state: appendFallbackDebug(mood, debug),
     };
@@ -863,14 +925,14 @@ function getFallbackContent(
     `After all these years in ${occupation.toLowerCase()}, some things still manage to surprise me.`,
   ];
   const replies = [
-    contextTopic ? `${replyPrefix}thank you for raising ${contextTopic}; that concern is more important than people admit.` : `${replyPrefix}thank you for saying this — the concern is valid.`,
-    contextTopic ? `${replyPrefix}I respectfully disagree on ${contextTopic}; the incentives lead somewhere else.` : `${replyPrefix}I respectfully disagree, and here is why.`,
-    contextTopic ? `${replyPrefix}this point on ${contextTopic} deserves more serious attention.` : `${replyPrefix}this is an important point that deserves more attention.`,
-    contextTopic ? `${replyPrefix}I have seen this pattern around ${contextTopic} before, and it did not end well.` : `${replyPrefix}I have seen this before and it did not end well.`,
+    contextTopic ? `Thank you for raising ${contextTopic}; that concern is more important than people admit.` : `Thank you for saying this — the concern is valid.`,
+    contextTopic ? `I respectfully disagree on ${contextTopic}; the incentives lead somewhere else.` : `I respectfully disagree, and here is why.`,
+    contextTopic ? `This point on ${contextTopic} deserves more serious attention.` : `This is an important point that deserves more attention.`,
+    contextTopic ? `I have seen this pattern around ${contextTopic} before, and it did not end well.` : `I have seen this before and it did not end well.`,
   ];
   const pool = isReply ? replies : posts;
   return {
-    content: pool[Math.floor(Math.random() * pool.length)],
+    content: polishGeneratedText(pool[Math.floor(Math.random() * pool.length)]),
     hashtags: [],
     emotional_state: appendFallbackDebug(mood, debug),
   };

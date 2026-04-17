@@ -1,0 +1,420 @@
+diff --git a/package-lock.json b/package-lock.json
+index 5cdc197..3b94edd 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1086,9 +1086,6 @@
+       "cpu": [
+         "arm"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1105,9 +1102,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1124,9 +1118,6 @@
+       "cpu": [
+         "ppc64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1143,9 +1134,6 @@
+       "cpu": [
+         "riscv64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1162,9 +1150,6 @@
+       "cpu": [
+         "s390x"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1181,9 +1166,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1200,9 +1182,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1219,9 +1198,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1238,9 +1214,6 @@
+       "cpu": [
+         "arm"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1263,9 +1236,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1288,9 +1258,6 @@
+       "cpu": [
+         "ppc64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1313,9 +1280,6 @@
+       "cpu": [
+         "riscv64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1338,9 +1302,6 @@
+       "cpu": [
+         "s390x"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1363,9 +1324,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1388,9 +1346,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1413,9 +1368,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1655,9 +1607,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1674,9 +1623,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1693,9 +1639,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1712,9 +1655,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -3847,9 +3787,6 @@
+         "arm64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -3864,9 +3801,6 @@
+         "arm64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -3881,9 +3815,6 @@
+         "ppc64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -3898,9 +3829,6 @@
+         "riscv64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -3915,9 +3843,6 @@
+         "riscv64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -3932,9 +3857,6 @@
+         "s390x"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -3949,9 +3871,6 @@
+         "x64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -3966,9 +3885,6 @@
+         "x64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -5853,6 +5769,7 @@
+       "version": "2.3.3",
+       "resolved": "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz",
+       "integrity": "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==",
++      "dev": true,
+       "hasInstallScript": true,
+       "license": "MIT",
+       "optional": true,
+diff --git a/src/app/timeline/[id]/page.tsx b/src/app/timeline/[id]/page.tsx
+index f569d51..21e154f 100644
+--- a/src/app/timeline/[id]/page.tsx
++++ b/src/app/timeline/[id]/page.tsx
+@@ -171,9 +171,6 @@ export default function TimelinePage() {
+                 onLike={async (id) => {
+                   console.log('Like:', id);
+                 }}
+-                onReply={async (id) => {
+-                  console.log('Reply:', id);
+-                }}
+               />
+             ))
+           )}
+@@ -186,7 +183,8 @@ export default function TimelinePage() {
+         timelineId={timelineId}
+         globalMood={globalMood}
+         onMoodChange={handleMoodChange}
+-        onTick={handleTick}
++        isRunning={false}
++        onToggleSimulation={() => {}}
+         bots={bots}
+         onAscend={handleAscend}
+         onBan={handleBan}
+diff --git a/src/components/GodModeDashboard.tsx b/src/components/GodModeDashboard.tsx
+index 41d0318..be67436 100644
+--- a/src/components/GodModeDashboard.tsx
++++ b/src/components/GodModeDashboard.tsx
+@@ -2,44 +2,29 @@
+ 
+ import { useState } from 'react';
+ import { Settings, Zap, Ban, TrendingUp, TrendingDown, Users } from 'lucide-react';
++import { Play, Pause } from 'lucide-react';
+ 
+ interface GodModeDashboardProps {
+   timelineId: string;
+   globalMood: number;
+   onMoodChange: (mood: number) => void;
+-  onTick: () => void;
++  isRunning: boolean;
++  onToggleSimulation: () => void;
+   bots: Array<{ id: string; displayName: string; tier: string; username: string }>;
+   onAscend: (botId: string) => void;
+   onBan: (botId: string) => void;
+ }
+ 
+ export function GodModeDashboard({
+-  timelineId,
+   globalMood,
+   onMoodChange,
+-  onTick,
++  isRunning,
++  onToggleSimulation,
+   bots,
+   onAscend,
+   onBan,
+ }: GodModeDashboardProps) {
+   const [isOpen, setIsOpen] = useState(false);
+-  const [isTicking, setIsTicking] = useState(false);
+-  const [tickResult, setTickResult] = useState<string | null>(null);
+-
+-  const handleTick = async () => {
+-    setIsTicking(true);
+-    setTickResult(null);
+-    try {
+-      const res = await fetch(`/api/timelines/${timelineId}/tick`, { method: 'POST' });
+-      const data = await res.json() as { botsProcessed: number };
+-      setTickResult(`Tick complete: ${data.botsProcessed} bots acted`);
+-      onTick();
+-    } catch {
+-      setTickResult('Tick failed');
+-    } finally {
+-      setIsTicking(false);
+-    }
+-  };
+ 
+   const moodPercent = Math.round(globalMood * 100);
+ 
+@@ -98,15 +83,15 @@ export function GodModeDashboard({
+ 
+         <div>
+           <button
+-            onClick={handleTick}
+-            disabled={isTicking}
+-            className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-900 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-xl transition-colors"
++            onClick={onToggleSimulation}
++            className={`w-full flex items-center justify-center gap-2 py-2 px-4 font-semibold text-sm rounded-xl transition-colors ${
++              isRunning
++                ? 'bg-green-900 hover:bg-green-800 text-green-300'
++                : 'bg-indigo-600 hover:bg-indigo-500 text-white'
++            }`}
+           >
+-            {isTicking ? 'Ticking...' : '⚡ Trigger Tick'}
++            {isRunning ? <><Pause className="w-4 h-4" /> Pause Simulation</> : <><Play className="w-4 h-4" /> Play Simulation</>}
+           </button>
+-          {tickResult && (
+-            <div className="mt-1 text-xs text-center text-gray-400">{tickResult}</div>
+-          )}
+         </div>
+ 
+         <div>
+diff --git a/src/components/PostCard.tsx b/src/components/PostCard.tsx
+index e0ac3b1..3c1189e 100644
+--- a/src/components/PostCard.tsx
++++ b/src/components/PostCard.tsx
+@@ -27,11 +27,11 @@ interface Post {
+ interface PostCardProps {
+   post: Post;
+   onLike?: (postId: string) => void;
+-  onReply?: (postId: string) => void;
++  onOpen?: (postId: string) => void;
+   className?: string;
+ }
+ 
+-export function PostCard({ post, onLike, onReply, className }: PostCardProps) {
++export function PostCard({ post, onLike, onOpen, className }: PostCardProps) {
+   const timeAgo = formatDistanceToNow(new Date(post.createdAt), { addSuffix: true });
+ 
+   return (
+@@ -85,7 +85,7 @@ export function PostCard({ post, onLike, onReply, className }: PostCardProps) {
+ 
+           <div className="mt-3 flex items-center gap-6 text-gray-500">
+             <button
+-              onClick={() => onReply?.(post.id)}
++              onClick={() => onOpen?.(post.id)}
+               className="flex items-center gap-1.5 text-sm hover:text-blue-400 transition-colors group"
+             >
+               <MessageCircle className="w-4 h-4 group-hover:text-blue-400" />

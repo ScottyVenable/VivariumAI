@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getOrCreateHumanActor } from '@/lib/human-actor';
+import { getOrCreateHumanActor } from '@/lib/bots/human-actor';
 
 export async function POST(
   _req: NextRequest,

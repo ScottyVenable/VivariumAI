@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Plus, Globe, Cpu, Clock } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Clock, Cpu, Globe, Plus } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { MobileBottomNav } from '@/components/MobileBottomNav';
 import { adminConfig } from '@config/admin';
@@ -16,6 +17,19 @@ interface Timeline {
   createdAt: string;
   _count: { bots: number; posts: number };
 }
+
+const WORLD_COPY: Record<string, string> = {
+  EARTH_MIRROR: 'Earth Mirror',
+  SYNTHETIC_WORLD: 'Synthetic World',
+};
+
+const formatWorldType = (type: string) => WORLD_COPY[type] ?? 'Custom';
+
+const moodTag = (value: number) => {
+  if (value >= 0.66) return { label: 'Positive', dotClass: 'bg-emerald-400' };
+  if (value <= 0.33) return { label: 'Tense', dotClass: 'bg-amber-400' };
+  return { label: 'Neutral', dotClass: 'bg-zinc-400' };
+};
 
 function normalizeTimeline(input: unknown): Timeline | null {
   if (!input || typeof input !== 'object') return null;
@@ -45,6 +59,7 @@ function normalizeTimeline(input: unknown): Timeline | null {
 }
 
 export default function HomePage() {
+  const router = useRouter();
   const [timelines, setTimelines] = useState<Timeline[]>([]);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -54,6 +69,7 @@ export default function HomePage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [deletingTimelineId, setDeletingTimelineId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch('/api/timelines')
@@ -63,7 +79,7 @@ export default function HomePage() {
           throw new Error('Timelines API returned a non-JSON response.');
         }
 
-        const payload = await r.json() as unknown;
+        const payload = (await r.json()) as unknown;
         if (!r.ok) {
           const message =
             payload && typeof payload === 'object' && 'error' in payload
@@ -83,7 +99,7 @@ export default function HomePage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim()) return;
+    if (!newName.trim() || loading) return;
     setLoading(true);
     setCreateError(null);
 
@@ -104,11 +120,14 @@ export default function HomePage() {
         );
       }
 
-      const payload = await res.json() as unknown;
+      const payload = (await res.json()) as unknown;
 
       if (!res.ok) {
         const message =
-          payload && typeof payload === 'object' && 'error' in payload && typeof (payload as { error?: unknown }).error === 'string'
+          payload &&
+          typeof payload === 'object' &&
+          'error' in payload &&
+          typeof (payload as { error?: unknown }).error === 'string'
             ? (payload as { error: string }).error
             : 'Timeline creation failed.';
         throw new Error(message);
@@ -122,6 +141,7 @@ export default function HomePage() {
       setTimelines(prev => [timeline, ...prev]);
       setCreating(false);
       setNewName('');
+      router.push(`/timeline/${timeline.id}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Timeline creation failed.';
       setCreateError(message);
@@ -140,7 +160,7 @@ export default function HomePage() {
     setDeletingTimelineId(timeline.id);
     try {
       const res = await fetch(`/api/timelines/${timeline.id}`, { method: 'DELETE' });
-      const payload = await res.json().catch(() => null) as { error?: string } | null;
+      const payload = (await res.json().catch(() => null)) as { error?: string } | null;
 
       if (!res.ok) {
         throw new Error(payload?.error || 'Failed to delete timeline.');
@@ -156,99 +176,116 @@ export default function HomePage() {
     }
   };
 
+  useEffect(() => {
+    if (creating) {
+      setTimeout(() => nameInputRef.current?.focus(), 80);
+    }
+  }, [creating]);
+
+  const stats = useMemo(() => {
+    const totalBots = timelines.reduce((acc, item) => acc + (item._count?.bots ?? 0), 0);
+    const totalPosts = timelines.reduce((acc, item) => acc + (item._count?.posts ?? 0), 0);
+    const avgMood =
+      timelines.length > 0
+        ? Math.round((timelines.reduce((acc, item) => acc + item.globalMood, 0) / timelines.length) * 100)
+        : 0;
+    return { totalBots, totalPosts, avgMood };
+  }, [timelines]);
+
   return (
     <main className="flex h-[100dvh] flex-col overflow-hidden bg-black">
-      <header className="border-b border-zinc-900 px-4 py-3 sm:px-6 sm:py-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-xl font-black text-white tracking-tight sm:text-2xl">
-              V I V A R I U M
-            </h1>
-            <p className="text-zinc-500 text-[11px] mt-0.5 sm:text-xs">
-              Multi-agent social simulation engine
-            </p>
+      <header className="sticky top-0 z-30 border-b border-zinc-800 bg-black/95 px-4 py-3 backdrop-blur sm:px-6">
+        <div className="mx-auto flex w-full max-w-4xl items-center justify-between">
+          <div>
+            <h1 className="text-xl font-semibold text-white sm:text-2xl">Vivarium</h1>
+            <p className="text-xs text-zinc-500">Local social simulation</p>
           </div>
           <button
             onClick={() => setCreating(true)}
-            aria-label="New Timeline"
-            className="flex items-center gap-2 whitespace-nowrap rounded-xl border border-zinc-800 bg-[#111111] px-3 py-2 text-xs font-semibold text-zinc-100 transition-colors hover:bg-zinc-900 sm:px-4 sm:text-sm"
+            className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black transition hover:bg-zinc-100"
           >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">New Timeline</span>
-            <span className="sm:hidden">New</span>
+            <Plus className="h-4 w-4" />
+            New Timeline
           </button>
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-10">
+      <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-5 pb-24 sm:px-6">
         {creating && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4">
-            <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-zinc-800 bg-[#111111] p-5 sm:p-6">
-              <h2 className="text-xl font-bold text-white mb-4">Create New Timeline</h2>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+            <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-black p-5">
+              <h2 className="mb-1 text-xl font-semibold text-white">Create timeline</h2>
+              <p className="mb-4 text-sm text-zinc-400">
+                Start a new simulation feed.
+              </p>
               <form onSubmit={handleCreate} className="space-y-4">
                 <div>
-                  <label htmlFor="timeline-name" className="text-sm text-zinc-400 block mb-1">
+                  <label htmlFor="timeline-name" className="mb-1 block text-xs font-medium text-zinc-400">
                     Timeline Name
                   </label>
                   <input
                     id="timeline-name"
+                    ref={nameInputRef}
                     type="text"
                     value={newName}
-                    onChange={e => setNewName(e.target.value)}
-                    placeholder="e.g. Terra Nova, Sector 7..."
-                    className="w-full rounded-xl border border-zinc-800 bg-black px-4 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
-                    autoFocus
+                    onChange={e => {
+                      setNewName(e.target.value);
+                      if (createError) setCreateError(null);
+                    }}
+                    placeholder="e.g. The World"
+                    className="w-full rounded-xl border border-zinc-700 bg-black px-3 py-2.5 text-sm text-white placeholder:text-zinc-500"
                   />
                 </div>
+
                 <div>
-                  <label htmlFor="world-type" className="text-sm text-zinc-400 block mb-1">
+                  <label htmlFor="world-type" className="mb-1 block text-xs font-medium text-zinc-400">
                     World Type
                   </label>
                   <select
                     id="world-type"
                     value={worldType}
                     onChange={e => setWorldType(e.target.value as WorldType)}
-                    className="w-full appearance-none rounded-xl border border-zinc-800 bg-black px-4 py-2.5 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                    className="w-full rounded-xl border border-zinc-700 bg-black px-3 py-2.5 text-sm text-white"
                   >
                     <option value="EARTH_MIRROR">Earth Mirror</option>
                     <option value="SYNTHETIC_WORLD">Synthetic World</option>
                   </select>
                 </div>
+
                 <div>
-                  <label className="text-sm text-zinc-400 block mb-1">
-                    Initial Bot Population: {botCount}
-                  </label>
+                  <div className="mb-2 flex items-center justify-between text-xs text-zinc-400">
+                    <span>Initial bots</span>
+                    <span>{botCount}</span>
+                  </div>
                   <input
                     type="range"
                     min={String(adminConfig.timeline.initialBotCount.min)}
                     max={String(adminConfig.timeline.initialBotCount.max)}
                     value={botCount}
-                    onChange={e => setBotCount(parseInt(e.target.value))}
-                    className="w-full accent-zinc-400"
+                    onChange={e => setBotCount(parseInt(e.target.value, 10))}
+                    className="w-full accent-blue-500"
                   />
-                  <div className="mt-1 flex justify-between text-xs text-zinc-600">
-                    <span>{adminConfig.timeline.initialBotCount.min}</span>
-                    <span>{adminConfig.timeline.initialBotCount.max}</span>
-                  </div>
                 </div>
-                <div className="flex gap-2 pt-2">
+
+                <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => setCreating(false)}
-                    className="flex-1 rounded-xl border border-zinc-800 py-2.5 text-sm text-zinc-400 transition-colors hover:text-zinc-100"
+                    className="flex-1 rounded-xl border border-zinc-700 px-3 py-2.5 text-sm text-zinc-300 hover:text-white"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={loading || !newName.trim()}
-                    className="flex-1 rounded-xl border border-zinc-700 bg-zinc-100 py-2.5 text-sm font-semibold text-black transition-colors hover:bg-white disabled:opacity-50"
+                    className="flex-1 rounded-xl bg-white px-3 py-2.5 text-sm font-semibold text-black disabled:opacity-40"
                   >
-                    {loading ? 'Generating...' : 'Create'}
+                    {loading ? 'Creating...' : 'Create'}
                   </button>
                 </div>
+
                 {createError && (
-                  <div className="rounded-lg border border-red-900 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+                  <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
                     {createError}
                   </div>
                 )}
@@ -257,80 +294,92 @@ export default function HomePage() {
           </div>
         )}
 
+        <section className="mb-5 grid grid-cols-3 gap-2">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5">
+            <div className="text-xs text-zinc-500">Timelines</div>
+            <div className="mt-1 text-lg font-semibold text-white">{timelines.length}</div>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5">
+            <div className="text-xs text-zinc-500">Entities</div>
+            <div className="mt-1 text-lg font-semibold text-white">{stats.totalBots}</div>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5">
+            <div className="text-xs text-zinc-500">Mood</div>
+            <div className="mt-1 text-lg font-semibold text-white">{stats.avgMood}%</div>
+          </div>
+        </section>
+
         {timelines.length === 0 ? (
-          <div className="text-center py-24">
-            <h2 className="text-xl font-bold text-white mb-2">No timelines yet</h2>
-            <p className="text-zinc-500 text-sm mb-6">
-              Create your first timeline to begin the simulation.
-            </p>
+          <div className="rounded-2xl border border-dashed border-zinc-700 px-6 py-16 text-center">
+            <h2 className="text-xl font-semibold text-white">No timelines yet</h2>
+            <p className="mt-2 text-sm text-zinc-500">Create your first simulation timeline.</p>
             <button
               onClick={() => setCreating(true)}
-              className="rounded-xl border border-zinc-700 bg-zinc-100 px-6 py-3 text-sm font-semibold text-black transition-colors hover:bg-white sm:text-base"
+              className="mt-5 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black"
             >
-              Create Timeline
+              Create timeline
             </button>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {timelines.map(tl => (
-              <div
-                key={tl.id}
-                className="group rounded-3xl border border-zinc-900/50 bg-[#111111] p-5 transition-colors hover:border-zinc-800/70 hover:bg-[#141414]"
-              >
-                <div className="mb-3 flex items-start justify-between gap-3">
-                  <Link href={`/timeline/${tl.id}`} className="min-w-0 flex-1">
-                    <h3 className="truncate text-lg font-bold text-white transition-colors group-hover:text-zinc-200">
-                      {tl.name}
-                    </h3>
-                    <div className="mt-0.5 flex items-center gap-1.5">
-                      <Globe className="h-3 w-3 text-zinc-500" />
-                      <span className="text-xs text-zinc-500">
-                        {tl.worldType === 'EARTH_MIRROR' ? 'Earth Mirror' : 'Synthetic World'}
+          <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-black">
+            {timelines.map(tl => {
+              const mood = moodTag(tl.globalMood);
+              return (
+                <article
+                  key={tl.id}
+                  className="border-b border-zinc-800 px-4 py-4 last:border-b-0"
+                >
+                  <div className="flex items-start gap-3">
+                    <Link href={`/timeline/${tl.id}`} className="min-w-0 flex-1">
+                      <h3 className="truncate text-base font-semibold text-white">{tl.name}</h3>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+                        <span className="inline-flex items-center gap-1">
+                          <Globe className="h-3.5 w-3.5" />
+                          {formatWorldType(tl.worldType)}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <Cpu className="h-3.5 w-3.5" />
+                          {tl._count?.bots ?? 0} entities
+                        </span>
+                        <span>{tl._count?.posts ?? 0} posts</span>
+                        <span className="inline-flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5" />
+                          {formatDistanceToNow(new Date(tl.createdAt), { addSuffix: true })}
+                        </span>
+                      </div>
+                    </Link>
+
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="inline-flex items-center gap-1 text-xs text-zinc-400">
+                        <span className={`h-2 w-2 rounded-full ${mood.dotClass}`} />
+                        {mood.label}
                       </span>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/timeline/${tl.id}`}
+                          className="rounded-full border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-white hover:border-zinc-500"
+                        >
+                          Open
+                        </Link>
+                        <button
+                          type="button"
+                          disabled={deletingTimelineId === tl.id}
+                          onClick={() => void handleDeleteTimeline(tl)}
+                          className="rounded-full border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-red-400 hover:text-red-200 disabled:opacity-40"
+                        >
+                          {deletingTimelineId === tl.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
                     </div>
-                  </Link>
-                  <button
-                    type="button"
-                    disabled={deletingTimelineId === tl.id}
-                    onClick={() => void handleDeleteTimeline(tl)}
-                    className="rounded-lg border border-zinc-800 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 transition-colors hover:border-red-800 hover:text-red-300 disabled:opacity-50"
-                    aria-label={`Delete ${tl.name}`}
-                  >
-                    {deletingTimelineId === tl.id ? 'Deleting…' : 'Delete'}
-                  </button>
-                  <div
-                    className={`w-3 h-3 rounded-full flex-shrink-0 mt-1 ${
-                      tl.globalMood > 0.66
-                        ? 'bg-green-400'
-                        : tl.globalMood < 0.34
-                        ? 'bg-red-400'
-                        : 'bg-yellow-400'
-                    }`}
-                    title={`Global mood: ${Math.round(tl.globalMood * 100)}%`}
-                  />
-                </div>
-                <Link href={`/timeline/${tl.id}`} className="block">
-                  <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-500 sm:gap-4">
-                    <span className="flex items-center gap-1">
-                      <Cpu className="w-3.5 h-3.5" />
-                      {tl._count?.bots ?? 0} entities
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Globe className="w-3.5 h-3.5" />
-                      {tl._count?.posts ?? 0} posts
-                    </span>
-                    <span className="flex items-center gap-1 sm:ml-auto">
-                      <Clock className="w-3.5 h-3.5" />
-                      {formatDistanceToNow(new Date(tl.createdAt), { addSuffix: true })}
-                    </span>
                   </div>
-                </Link>
-              </div>
-            ))}
-          </div>
+                </article>
+              );
+            })}
+          </section>
         )}
+
         {deleteError && (
-          <div className="mt-4 rounded-lg border border-red-900 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+          <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
             {deleteError}
           </div>
         )}

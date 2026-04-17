@@ -49,12 +49,18 @@ export const adminConfig = {
       replyChance: 0.28,
       minNonHumanTargetScoreForReply: 4,
     },
+    news: {
+      enabled: true,
+      minSources: 2,
+      maxSources: 3,
+      postChancePerTick: 0.22,
+    },
   },
 
   ai: {
     models: {
-      decision: 'nvidia/nemotron-3-nano-4b',
-      content: 'nvidia/nemotron-3-nano-4b',
+      decision: 'google/gemma-3-4b',
+      content: 'google/gemma-3-4b',
     },
     decision: {
       maxTokens: 220,

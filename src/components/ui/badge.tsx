@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { BotTier, TIER_CONFIG } from '@/lib/tier-config';
+import { BotTier, TIER_CONFIG } from '@/lib/bots/tier-config';
 
 interface TierBadgeProps {
   tier: BotTier | string;

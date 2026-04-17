@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getActiveTimelineId, stopTickLoop } from '@/lib/tick';
+import { getActiveTimelineId, stopTickLoop } from '@/lib/ai/tick';
 
 export async function GET(
   _req: NextRequest,

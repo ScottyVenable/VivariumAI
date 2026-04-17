@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { TrendingUp, Activity } from 'lucide-react';
+import { TrendingUp, Activity, AlertTriangle } from 'lucide-react';
 
 interface TrendingTag {
   tag: string;
@@ -20,17 +20,22 @@ interface PulseSidebarProps {
 
 export function PulseSidebar({ timelineId }: PulseSidebarProps) {
   const [pulse, setPulse] = useState<PulseData | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     const fetchPulse = async () => {
-      const res = await fetch(`/api/timelines/${timelineId}/pulse`);
-      if (res.ok) {
+      try {
+        const res = await fetch(`/api/timelines/${timelineId}/pulse`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         setPulse(await res.json() as PulseData);
+        setError(false);
+      } catch {
+        setError(true);
       }
     };
 
-    fetchPulse();
-    const interval = setInterval(fetchPulse, 30000);
+    void fetchPulse();
+    const interval = setInterval(() => void fetchPulse(), 30000);
     return () => clearInterval(interval);
   }, [timelineId]);
 
@@ -52,60 +57,86 @@ export function PulseSidebar({ timelineId }: PulseSidebarProps) {
 
   return (
     <aside className="order-1 w-full lg:w-64 xl:w-72 lg:flex-shrink-0 lg:overflow-y-auto">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 lg:gap-4">
-        <div className="rounded-3xl border border-zinc-900/50 bg-[#111111] p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Activity className="w-4 h-4 text-purple-400" />
-            <h3 className="font-bold text-white text-sm">Global Pulse</h3>
-          </div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-gray-400 text-xs">Collective Mood</span>
-            <span className={`font-bold text-sm ${moodColor}`}>{moodLabel}</span>
-          </div>
-          {pulse && (
-            <>
-              <div className="mb-3 h-2 w-full rounded-full bg-zinc-900">
-                <div
-                  className={`h-2 rounded-full transition-all duration-1000 ${
-                    pulse.globalMood > 0.66
-                      ? 'bg-purple-400'
-                      : pulse.globalMood < 0.34
-                      ? 'bg-zinc-500'
-                      : 'bg-zinc-300'
-                  }`}
-                  style={{ width: `${pulse.globalMood * 100}%` }}
-                />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+        <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Activity className="h-4 w-4 text-zinc-400" />
+              <h3 className="text-sm font-semibold text-white">
+                Global Pulse
+              </h3>
+            </div>
+            {error ? (
+              <div className="flex items-center gap-2 text-xs text-zinc-500">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
+                Pulse data unavailable
               </div>
-              <div className="text-xs text-gray-500">
-                {pulse.recentPostCount} posts in the last 24h
-              </div>
-            </>
-          )}
+            ) : (
+              <>
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span>Collective mood</span>
+                  <span className={`font-semibold ${moodColor}`}>{moodLabel}</span>
+                </div>
+                {pulse ? (
+                  <>
+                    <div className="h-2 w-full rounded-full bg-zinc-800">
+                      <div
+                        className={`h-full rounded-full transition-[width] duration-700 ${
+                          pulse.globalMood > 0.66
+                            ? 'bg-emerald-400'
+                            : pulse.globalMood < 0.34
+                            ? 'bg-amber-400'
+                            : 'bg-zinc-400'
+                        }`}
+                        style={{ width: `${Math.min(100, Math.max(0, pulse.globalMood * 100))}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                      <span>{pulse.recentPostCount} posts in last 24h</span>
+                      <span>{Math.round(pulse.globalMood * 100)}% unity</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="h-4 rounded-full bg-white/10 animate-pulse" />
+                    <div className="h-2 w-3/4 rounded-full bg-white/10 animate-pulse" />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
 
-        <div className="rounded-3xl border border-zinc-900/50 bg-[#111111] p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <TrendingUp className="w-4 h-4 text-purple-400" />
-            <h3 className="font-bold text-white text-sm">Trending in the Vivarium</h3>
+        <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <TrendingUp className="h-4 w-4 text-zinc-400" />
+            <h3 className="text-sm font-semibold text-white">
+              Trending
+            </h3>
           </div>
-          {pulse?.trending.length === 0 && (
-            <div className="text-gray-500 text-sm">No trending topics yet.</div>
+          {error && <div className="text-xs text-zinc-500">No data available</div>}
+          {!error && pulse?.trending.length === 0 && (
+            <div className="text-sm text-zinc-500">No trending topics yet.</div>
           )}
-          {pulse?.trending.map((item, i) => (
-            <div key={item.tag} className="border-b border-zinc-900 py-2 last:border-0">
-              <div className="flex items-center justify-between">
+          {!error &&
+            pulse?.trending.map((item, i) => (
+              <div
+                key={item.tag}
+                className="mb-2 flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 last:mb-0"
+              >
                 <div>
-                  <div className="text-xs text-gray-500">#{i + 1} Trending</div>
-                  <div className="text-white font-semibold text-sm">{item.tag}</div>
+                  <div className="text-[10px] text-zinc-500">
+                    #{i + 1} trending
+                  </div>
+                  <div className="text-sm font-semibold text-white">{item.tag}</div>
                 </div>
-                <div className="text-gray-500 text-xs">{item.count} posts</div>
+                <div className="text-xs text-zinc-400">{item.count} posts</div>
               </div>
-            </div>
-          ))}
-          {!pulse && (
+            ))}
+          {!error && !pulse && (
             <div className="space-y-2">
               {[1, 2, 3].map(i => (
-                <div key={i} className="h-8 bg-white/5 rounded animate-pulse" />
+                <div key={i} className="h-9 rounded-2xl bg-white/10 animate-pulse" />
               ))}
             </div>
           )}

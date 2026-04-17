@@ -1,6 +1,6 @@
-import { prisma } from './db';
-import { claimAvatar } from './avatars';
-import { stringifyBotMemory } from './memory';
+import { prisma } from '../db';
+import { claimAvatar } from '../avatars';
+import { stringifyBotMemory } from '../ai/memory';
 
 const OCCUPATIONS = [
   // Tech & Digital
@@ -141,6 +141,39 @@ const TALKING_STYLES = [
   'Enthusiastic and energetic, brings infectious excitement to topics',
 ];
 
+const NEWS_OUTLETS = [
+  {
+    slug: 'bbc',
+    displayName: 'BBC World Desk',
+    bio: 'Breaking international coverage and verified developing stories',
+  },
+  {
+    slug: 'cnn',
+    displayName: 'CNN LiveWire',
+    bio: 'Live updates across politics, world events, and major incidents',
+  },
+  {
+    slug: 'nbc',
+    displayName: 'NBC Newsroom',
+    bio: 'National desk updates with context and rapid follow-ups',
+  },
+  {
+    slug: 'cbs',
+    displayName: 'CBS News Briefing',
+    bio: 'Fast headlines with grounded reporting and fact-checked notes',
+  },
+  {
+    slug: 'reuters',
+    displayName: 'Reuters Snapshot',
+    bio: 'Wire-style updates focused on verified facts and timelines',
+  },
+  {
+    slug: 'ap',
+    displayName: 'AP News Wire',
+    bio: 'Associated Press style bulletin feed for rapid developments',
+  },
+] as const;
+
 function randomBetween(min: number, max: number): number {
   return Math.random() * (max - min) + min;
 }
@@ -150,18 +183,68 @@ function generateUsername(displayName: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '') // Remove special chars
     .slice(0, 15); // Limit length
-  
-  const suffixes = ['_', '.', ''];
-  const separator = suffixes[Math.floor(Math.random() * suffixes.length)];
-  
-  const identifiers = [
-    Math.floor(Math.random() * 999).toString(),
-    new Date().getFullYear().toString(),
-    ['dev', 'pro', 'real', 'official', 'true'][Math.floor(Math.random() * 5)],
-  ];
-  
-  const identifier = identifiers[Math.floor(Math.random() * identifiers.length)];
-  return `${base}${separator}${identifier}`.slice(0, 30); // Enforce max length
+
+  const token = Math.random().toString(36).slice(2, 8);
+  return `${base}_${token}`.slice(0, 30); // Enforce max length
+}
+
+function isUsernameUniqueViolation(error: unknown): boolean {
+  const queue: unknown[] = [error];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+
+    if (current instanceof Error) {
+      const message = current.message || '';
+      if (/unique constraint failed/i.test(message) && /username/i.test(message)) {
+        return true;
+      }
+
+      const maybeCause = (current as Error & { cause?: unknown }).cause;
+      if (maybeCause) {
+        queue.push(maybeCause);
+      }
+    }
+
+    if (typeof current === 'object') {
+      const candidate = current as {
+        code?: string;
+        meta?: { target?: unknown };
+        message?: string;
+        cause?: unknown;
+      };
+
+      if (candidate.code === 'P2002') {
+        const target = candidate.meta?.target;
+        if (Array.isArray(target) && target.some(value => String(value).toLowerCase().includes('username'))) {
+          return true;
+        }
+        if (typeof target === 'string' && target.toLowerCase().includes('username')) {
+          return true;
+        }
+      }
+
+      if (typeof candidate.message === 'string') {
+        const message = candidate.message;
+        if (/unique constraint failed/i.test(message) && /username/i.test(message)) {
+          return true;
+        }
+      }
+
+      if (candidate.cause) {
+        queue.push(candidate.cause);
+      }
+    }
+  }
+
+  return false;
+}
+
+function pickNewsSourceCount(minSources: number, maxSources: number): number {
+  const min = Math.max(1, Math.floor(minSources));
+  const max = Math.max(min, Math.floor(maxSources));
+  return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 function generateBio(occupation: string, age: number, compassion: number): string {
@@ -222,7 +305,6 @@ export async function generateBots(options: BotGenerationOptions): Promise<strin
     const firstName = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
     const lastName = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
     const displayName = `${firstName} ${lastName}`;
-    const username = generateUsername(displayName);
     const occupation = OCCUPATIONS[Math.floor(Math.random() * OCCUPATIONS.length)];
     const talkingStyle = TALKING_STYLES[Math.floor(Math.random() * TALKING_STYLES.length)];
     const simulatedAge = Math.floor(randomBetween(18, 65));
@@ -230,34 +312,157 @@ export async function generateBots(options: BotGenerationOptions): Promise<strin
     
     const avatarUrl = await claimAvatar();
 
-    const bot = await prisma.bot.create({
-      data: {
-        username,
-        displayName,
-        avatarUrl,
-        tier,
-        bio: generateBio(occupation, simulatedAge, compassion),
-        memory: stringifyBotMemory({
-          topics: [occupation, compassion > 0.6 ? 'community' : 'discourse'],
-          people: [],
-          recent: [`Joined the timeline as ${displayName}`],
-        }),
-        isHuman: false,
-        influenceability: randomBetween(0.1, 0.9),
-        reactivity: randomBetween(0.1, 0.9),
-        compassion,
-        extraversion: randomBetween(0.1, 0.9),
-        reasoningSkill: randomBetween(0.1, 0.9),
-        humanSentiment: randomBetween(0.1, 0.9),
-        simulatedAge,
-        occupation,
-        talkingStyle,
-        netWorth: randomBetween(500, 10000),
-        timelineId,
-      } as any,
-    });
+    let bot: { id: string } | null = null;
+    const maxAttempts = 30;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const username = generateUsername(displayName);
+
+      try {
+        bot = await prisma.bot.create({
+          data: {
+            username,
+            displayName,
+            avatarUrl,
+            tier,
+            bio: generateBio(occupation, simulatedAge, compassion),
+            memory: stringifyBotMemory({
+              topics: [occupation, compassion > 0.6 ? 'community' : 'discourse'],
+              people: [],
+              recent: [`Joined the timeline as ${displayName}`],
+            }),
+            isHuman: false,
+            influenceability: randomBetween(0.1, 0.9),
+            reactivity: randomBetween(0.1, 0.9),
+            compassion,
+            extraversion: randomBetween(0.1, 0.9),
+            reasoningSkill: randomBetween(0.1, 0.9),
+            humanSentiment: randomBetween(0.1, 0.9),
+            simulatedAge,
+            occupation,
+            talkingStyle,
+            netWorth: randomBetween(500, 10000),
+            timelineId,
+          } as any,
+          select: { id: true },
+        });
+        break;
+      } catch (error) {
+        if (isUsernameUniqueViolation(error) && attempt < maxAttempts - 1) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!bot) {
+      throw new Error(`Unable to create unique username for ${displayName}`);
+    }
 
     createdIds.push(bot.id);
+  }
+
+  return createdIds;
+}
+
+export async function generateNewsSourceBots(
+  timelineId: string,
+  minSources = 2,
+  maxSources = 3
+): Promise<string[]> {
+  const existing = await prisma.bot.findMany({
+    where: {
+      timelineId,
+      username: { startsWith: 'news_' },
+    },
+    select: { id: true },
+  });
+
+  const targetCount = Math.min(
+    NEWS_OUTLETS.length,
+    pickNewsSourceCount(minSources, maxSources)
+  );
+
+  if (existing.length >= targetCount) {
+    return [];
+  }
+
+  const createdIds: string[] = [];
+  const usedSlugs = new Set<string>();
+
+  const shuffledOutlets = [...NEWS_OUTLETS].sort(() => Math.random() - 0.5);
+
+  for (const outlet of shuffledOutlets) {
+    if (existing.length + createdIds.length >= targetCount) break;
+    if (usedSlugs.has(outlet.slug)) continue;
+
+    const alreadyExists = await prisma.bot.findFirst({
+      where: {
+        timelineId,
+        username: {
+          startsWith: `news_${outlet.slug}`,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (alreadyExists) {
+      usedSlugs.add(outlet.slug);
+      continue;
+    }
+
+    const avatarUrl = await claimAvatar();
+
+    let created: { id: string } | null = null;
+    const maxAttempts = 30;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const token = Math.random().toString(36).slice(2, 7);
+      const username = `news_${outlet.slug}_${token}`.slice(0, 30);
+
+      try {
+        created = await prisma.bot.create({
+          data: {
+            username,
+            displayName: outlet.displayName,
+            avatarUrl,
+            tier: 'STANDARD_USER',
+            bio: outlet.bio,
+            memory: stringifyBotMemory({
+              topics: ['breaking news', 'world updates', 'public safety'],
+              people: [],
+              recent: [`Initialized ${outlet.displayName} feed`],
+            }),
+            isHuman: false,
+            influenceability: 0.15,
+            reactivity: 0.4,
+            compassion: 0.45,
+            extraversion: 0.55,
+            reasoningSkill: 0.8,
+            humanSentiment: 0.5,
+            simulatedAge: 35,
+            occupation: 'News Organization',
+            talkingStyle: 'Brief, factual bulletin style with neutral wording',
+            netWorth: 9000,
+            timelineId,
+          } as any,
+          select: { id: true },
+        });
+        break;
+      } catch (error) {
+        if (isUsernameUniqueViolation(error) && attempt < maxAttempts - 1) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!created) {
+      throw new Error(`Unable to create unique username for news source ${outlet.displayName}`);
+    }
+
+    usedSlugs.add(outlet.slug);
+    createdIds.push(created.id);
   }
 
   return createdIds;

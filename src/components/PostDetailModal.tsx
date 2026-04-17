@@ -6,6 +6,8 @@ import { ArrowLeft, Heart, MessageCircle, Send, Share2, X } from 'lucide-react';
 import { Avatar } from '@/components/ui/avatar';
 import { TierBadge } from '@/components/ui/badge';
 import { parsePostDebugInfo, renderMentions, type Post } from '@/components/PostCard';
+import { MentionAutocomplete } from '@/components/MentionAutocomplete';
+import { detectActiveMention, replaceMention, type MentionCandidate } from '@/lib/mentions';
 import { cn } from '@/lib/utils';
 import { adminConfig } from '@config/admin';
 
@@ -80,6 +82,7 @@ function ReplyThread({
   onLike,
   onReplyTo,
   onOpenProfile,
+  onMentionClick,
 }: {
   reply: Reply;
   depth?: number;
@@ -88,6 +91,7 @@ function ReplyThread({
   onLike: (id: string) => void;
   onReplyTo: (reply: Reply) => void;
   onOpenProfile?: (botId: string) => void;
+  onMentionClick?: (username: string) => void;
 }) {
   const liked = likedPostIds.has(reply.id);
   const timeAgo = formatDistanceToNow(new Date(reply.createdAt), { addSuffix: true });
@@ -99,7 +103,7 @@ function ReplyThread({
   return (
     <div className="relative">
       <div
-        className="border-b border-zinc-900 bg-black px-4 py-3 transition-colors hover:bg-zinc-950"
+        className="border-b border-white/5 bg-black/25 px-4 py-3 transition-colors hover:bg-black/35"
         onContextMenu={event => {
           if (!isDev || !debugInfo) return;
           event.preventDefault();
@@ -132,7 +136,7 @@ function ReplyThread({
             )}
 
             <p className="mb-2 whitespace-pre-wrap break-words text-[14px] leading-snug text-zinc-100">
-              {renderMentions(reply.content)}
+              {renderMentions(reply.content, onMentionClick)}
             </p>
 
             {moodLabel && (
@@ -262,7 +266,7 @@ function ReplyThread({
       </div>
 
       {reply.replies.length > 0 && (
-        <div className="ml-8 border-l border-zinc-900/80">
+        <div className="ml-8 border-l border-white/10">
           {reply.replies.map(child => (
             <ReplyThread
               key={child.id}
@@ -273,6 +277,7 @@ function ReplyThread({
               onLike={onLike}
               onReplyTo={onReplyTo}
               onOpenProfile={onOpenProfile}
+              onMentionClick={onMentionClick}
             />
           ))}
         </div>
@@ -299,6 +304,10 @@ export function PostDetailModal({
   const [replyingToLabel, setReplyingToLabel] = useState<string | null>(null);
   const [replyError, setReplyError] = useState<string | null>(null);
   const [debugTooltip, setDebugTooltip] = useState<{ x: number; y: number } | null>(null);
+  const [mentionCandidates, setMentionCandidates] = useState<MentionCandidate[]>([]);
+  const [activeMention, setActiveMention] = useState<{ mention: string; startIndex: number } | null>(null);
+  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
+  const [mentionPopupPos, setMentionPopupPos] = useState<{ top: number; left: number } | undefined>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const isDev = process.env.NODE_ENV !== 'production';
@@ -323,6 +332,24 @@ export function PostDetailModal({
     void fetchPost();
   }, [fetchPost]);
 
+  // Fetch available bots for mention autocomplete
+  useEffect(() => {
+    const fetchBots = async () => {
+      try {
+        const res = await fetch(`/api/timelines/${timelineId}/bots?limit=100`);
+        if (res.ok) {
+          const data = await res.json() as Array<{ id: string; displayName: string; username: string }>;
+          // Filter out bots without usernames to avoid autocomplete issues
+          setMentionCandidates(data.filter(bot => bot.username && bot.displayName));
+        }
+      } catch (err) {
+        console.error('Failed to fetch bots for mention autocomplete:', err);
+      }
+    };
+
+    void fetchBots();
+  }, [timelineId]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -343,11 +370,115 @@ export function PostDetailModal({
 
   const focusReplyBox = (prefill = '') => {
     setReplyText(prefill);
+    setActiveMention(null);
+    setMentionPopupPos(undefined);
     setTimeout(() => {
       textareaRef.current?.focus();
       const len = prefill.length;
       textareaRef.current?.setSelectionRange(len, len);
     }, 50);
+  };
+
+  const handleMentionSelect = (candidate: MentionCandidate) => {
+    if (!activeMention || !textareaRef.current) return;
+
+    const currentCursorPos = textareaRef.current.selectionStart;
+    const { newText, newCursorPosition } = replaceMention(
+      replyText,
+      activeMention.startIndex,
+      currentCursorPos,
+      candidate
+    );
+
+    setReplyText(newText);
+    setActiveMention(null);
+    setMentionPopupPos(undefined);
+    setMentionSelectedIndex(0);
+
+    setTimeout(() => {
+      textareaRef.current?.setSelectionRange(newCursorPosition, newCursorPosition);
+      textareaRef.current?.focus();
+    }, 0);
+  };
+
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newText = e.target.value;
+    const cursorPos = e.target.selectionStart;
+
+    // Filter out self-mentions by removing current user from candidates
+    // Since we don't have current user info in this component, we'll filter on display
+    const filteredCandidates = mentionCandidates;
+
+    setReplyText(newText);
+    if (replyError) setReplyError(null);
+
+    // Detect active mention
+    const mention = detectActiveMention(newText, cursorPos);
+    setActiveMention(mention);
+    setMentionSelectedIndex(0);
+
+    // Calculate popup position
+    if (mention && filteredCandidates.length > 0) {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        const rect = textarea.getBoundingClientRect();
+        // Position popup below the textarea, adjusted for scroll
+        setMentionPopupPos({
+          top: rect.bottom + 4,
+          left: rect.left,
+        });
+      }
+    } else {
+      setMentionPopupPos(undefined);
+    }
+  };
+
+  const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      void handleSubmitReply();
+      return;
+    }
+
+    // Handle Tab to autocomplete mention
+    if (e.key === 'Tab' && activeMention && mentionCandidates.length > 0) {
+      e.preventDefault();
+      const filtered = mentionCandidates.filter(
+        c =>
+          c.username.toLowerCase().includes(activeMention.mention.toLowerCase()) ||
+          c.displayName.toLowerCase().includes(activeMention.mention.toLowerCase())
+      );
+      if (filtered.length > 0) {
+        handleMentionSelect(filtered[mentionSelectedIndex] ?? filtered[0]);
+      }
+      return;
+    }
+
+    // Handle arrow keys for mention selection
+    if (e.key === 'ArrowDown' && activeMention && mentionCandidates.length > 0) {
+      e.preventDefault();
+      const filtered = mentionCandidates.filter(
+        c =>
+          c.username.toLowerCase().includes(activeMention.mention.toLowerCase()) ||
+          c.displayName.toLowerCase().includes(activeMention.mention.toLowerCase())
+      );
+      if (filtered.length > 0) {
+        setMentionSelectedIndex(prev => (prev + 1) % filtered.length);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowUp' && activeMention && mentionCandidates.length > 0) {
+      e.preventDefault();
+      const filtered = mentionCandidates.filter(
+        c =>
+          c.username.toLowerCase().includes(activeMention.mention.toLowerCase()) ||
+          c.displayName.toLowerCase().includes(activeMention.mention.toLowerCase())
+      );
+      if (filtered.length > 0) {
+        setMentionSelectedIndex(prev => (prev - 1 + filtered.length) % filtered.length);
+      }
+      return;
+    }
   };
 
   const handleReplyToReply = (reply: Reply) => {
@@ -393,6 +524,14 @@ export function PostDetailModal({
     }
   };
 
+  const handleMentionClick = (username: string) => {
+    // Look up the bot by username and open their profile
+    const bot = mentionCandidates.find(b => b.username.toLowerCase() === username.toLowerCase());
+    if (bot) {
+      onOpenProfile?.(bot.id);
+    }
+  };
+
   const handleLike = async (id: string) => {
     if (likedPostIds.has(id)) return;
 
@@ -417,14 +556,14 @@ export function PostDetailModal({
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 px-2 py-4 backdrop-blur-sm sm:px-0"
       onClick={e => { if (e.target === overlayRef.current) onClose(); }}
     >
-      <div className="relative flex h-full w-full max-w-[640px] flex-col overflow-hidden bg-black shadow-2xl sm:border-x sm:border-zinc-900">
-        <div className="sticky top-0 z-10 flex items-center gap-4 border-b border-zinc-900 bg-black/90 px-4 py-3 backdrop-blur">
+      <div className="relative flex h-full w-full max-w-[640px] flex-col overflow-hidden rounded-none border border-zinc-800 bg-black shadow-2xl sm:rounded-2xl">
+        <div className="sticky top-0 z-10 flex items-center gap-4 border-b border-zinc-800 bg-black/95 px-4 py-3 backdrop-blur">
           <button
             onClick={onClose}
-            className="rounded-full p-2 text-white transition-colors hover:bg-zinc-900"
+            className="rounded-full border border-zinc-700 p-2 text-white transition hover:border-zinc-500"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -434,7 +573,7 @@ export function PostDetailModal({
           </div>
           <button
             onClick={onClose}
-            className="ml-auto rounded-full p-2 text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-white"
+            className="ml-auto rounded-full border border-zinc-700 p-2 text-zinc-500 transition hover:border-zinc-500 hover:text-white"
           >
             <X className="h-4 w-4" />
           </button>
@@ -443,14 +582,14 @@ export function PostDetailModal({
         <div className="flex-1 overflow-y-auto overscroll-contain">
           {loading && (
             <div className="flex items-center justify-center py-16">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-700 border-t-white" />
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
             </div>
           )}
 
           {!loading && post && (
             <>
               <div
-                className="border-b border-zinc-900 px-4 pb-3 pt-4"
+                className="border-b border-zinc-800 px-4 pb-3 pt-4"
                 onContextMenu={event => {
                   if (!isDev || !postDebugInfo) return;
                   event.preventDefault();
@@ -476,7 +615,7 @@ export function PostDetailModal({
                 </div>
 
                 <p className="mb-3 whitespace-pre-wrap break-words text-[18px] leading-snug text-zinc-100">
-                  {renderMentions(post.content)}
+                  {renderMentions(post.content, handleMentionClick)}
                 </p>
 
                 {postMoodLabel && (
@@ -495,11 +634,11 @@ export function PostDetailModal({
                   </div>
                 )}
 
-                <div className="mb-3 border-b border-zinc-900 pb-3 text-sm text-zinc-500">
+                <div className="mb-3 border-b border-zinc-800 pb-3 text-sm text-zinc-500">
                   {timeAgo}
                 </div>
 
-                <div className="mb-3 flex gap-5 border-b border-zinc-900 pb-3 text-sm">
+                <div className="mb-3 flex gap-5 border-b border-zinc-800 pb-3 text-sm">
                   <span>
                     <span className="font-bold text-white">{totalReplies}</span>
                     <span className="ml-1 text-zinc-500">Replies</span>
@@ -510,7 +649,7 @@ export function PostDetailModal({
                   </span>
                 </div>
 
-                <div className="flex items-center gap-5 border-b border-zinc-900 pb-3 text-zinc-500">
+                <div className="flex items-center gap-5 border-b border-zinc-800 pb-3 text-zinc-500">
                   <button
                     onClick={() => {
                       setReplyTargetId(null);
@@ -641,6 +780,7 @@ export function PostDetailModal({
                     onLike={handleLike}
                     onReplyTo={handleReplyToReply}
                     onOpenProfile={onOpenProfile}
+                    onMentionClick={handleMentionClick}
                   />
                 ))
               )}
@@ -648,7 +788,7 @@ export function PostDetailModal({
           )}
         </div>
 
-        <div className="border-t border-zinc-900 bg-black px-4 py-3">
+        <div className="border-t border-zinc-800 bg-black px-4 py-3">
           {replyingToLabel && (
             <div className="mb-2 flex items-center justify-between text-xs text-zinc-500">
               <span>{replyingToLabel}</span>
@@ -666,22 +806,26 @@ export function PostDetailModal({
           {replyError && <div className="mb-2 text-xs text-red-400">{replyError}</div>}
           <div className="flex items-end gap-3">
             <Avatar src={null} alt="You" size={36} />
-            <div className="relative flex-1 rounded-2xl border border-zinc-800 bg-zinc-950/80 px-3 py-2">
+            <div className="relative flex-1 rounded-2xl border border-zinc-700 bg-black px-3 py-2">
               <textarea
                 ref={textareaRef}
                 value={replyText}
-                onChange={e => {
-                  setReplyText(e.target.value);
-                  if (replyError) setReplyError(null);
-                }}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void handleSubmitReply();
-                }}
-                placeholder={replyTargetId ? 'Post your reply to this comment…' : `Reply to @${post?.author.username ?? ''}…`}
+                onChange={handleTextareaChange}
+                onKeyDown={handleTextareaKeyDown}
+                placeholder={replyTargetId ? 'Post your reply to this comment… (Type @ to mention)' : `Reply to @${post?.author.username ?? ''}… (Type @ to mention)`}
                 rows={1}
                 style={{ caretColor: 'auto' }}
                 className="min-h-[36px] max-h-[140px] w-full resize-none overflow-y-auto bg-transparent text-[15px] leading-snug text-zinc-100 placeholder-zinc-600 focus:outline-none"
               />
+              {activeMention && (
+                <MentionAutocomplete
+                  candidates={mentionCandidates}
+                  mention={activeMention.mention}
+                  onSelect={handleMentionSelect}
+                  position={mentionPopupPos}
+                  selectedIndex={mentionSelectedIndex}
+                />
+              )}
               <div className="mt-2 flex items-center justify-between text-xs text-zinc-500">
                 <span>⌘/Ctrl + Enter to send</span>
                 <span className={cn(characterCount > adminConfig.content.warningLength && 'text-orange-400', characterCount > adminConfig.content.maxLength && 'text-red-400')}>
@@ -692,7 +836,7 @@ export function PostDetailModal({
             <button
               onClick={() => void handleSubmitReply()}
               disabled={!replyText.trim() || submitting || characterCount > adminConfig.content.maxLength}
-              className="flex flex-shrink-0 items-center gap-1.5 rounded-full bg-white px-4 py-2 text-sm font-bold text-black transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="flex flex-shrink-0 items-center gap-1.5 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               <Send className="h-3.5 w-3.5" />
               Reply

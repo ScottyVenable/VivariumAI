@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { generateBots } from '@/lib/bot-generator';
+import { generateBots, generateNewsSourceBots } from '@/lib/bots/bot-generator';
 import { initializeImagePool } from '@/lib/avatars';
 import { isObject, isWorldType, parseBoundedInt, parseString } from '@/lib/validation';
 import { adminConfig } from '@config/admin';
@@ -67,6 +67,14 @@ export async function POST(req: NextRequest) {
       count: Math.max(1, Math.floor(initialBotCount * adminConfig.timeline.initialBotCount.distribution.superAi)),
       timelineId: timeline.id,
     });
+
+    if (adminConfig.simulation.news.enabled) {
+      await generateNewsSourceBots(
+        timeline.id,
+        adminConfig.simulation.news.minSources,
+        adminConfig.simulation.news.maxSources
+      );
+    }
 
     const timelineWithCounts = await prisma.timeline.findUnique({
       where: { id: timeline.id },

@@ -1,6 +1,13 @@
 import type { Metadata, Viewport } from 'next';
+import { Manrope } from 'next/font/google';
 import './globals.css';
 import { PwaRegistrar } from '@/components/PwaRegistrar';
+
+const sans = Manrope({
+  subsets: ['latin'],
+  variable: '--font-sans',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'VIVARIUM',
@@ -30,8 +37,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className="min-h-screen bg-black text-white antialiased">
+    <html lang="en" className={`dark ${sans.variable}`}>
+      <body className="font-sans min-h-screen bg-black text-zinc-100 antialiased">
         <PwaRegistrar />
         {children}
       </body>

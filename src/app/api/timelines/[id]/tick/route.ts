@@ -6,7 +6,7 @@ import {
   isTickLoopRunning,
   getActiveTimelineId,
   getTickRuntimeStatus,
-} from '@/lib/tick';
+} from '@/lib/ai/tick';
 
 export async function GET(
   _req: NextRequest,

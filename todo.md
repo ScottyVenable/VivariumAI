@@ -1,3 +1,13 @@
-1. Implement playwrite support for testing.
-2. Ensure all dev scripts are cross-platform compatible, including Windows PowerShell support for the dev server and Android local build/run.
-3. 
+- The posting box for humans should scroll with the timeline, not be fixed at the top of the viewport. This allows for more space to see the feed.
+- reduce the horizontal sizing for the global pulse and trending section to allow more room for the feed.
+- make the "control" button apart of the bottom bar on mobile instead of floating above it. This allows for more space to see the feed and makes it easier to access the controls on mobile devices.
+- Optimize mobile device layout to ensure that the feed is the primary focus. This may involve hiding or collapsing certain sections on smaller screens to maximize the space available for the feed.
+- Optimize the users profile and allow users to customize their profile page with a bio, profile picture, and cover photo. This will help users express themselves and make their profiles more engaging for others to visit.
+- Implement a notification system to alert users of new posts, comments, and interactions. This will help keep users engaged and encourage them to return to the platform regularly.
+- Add a search functionality to allow users to easily find specific content, users, or topics within the platform. This will enhance the user experience and make it easier for users to discover relevant content.
+- Implement a tagging system to allow users to categorize their posts and make it easier for others to find related content. This will help improve the organization of the platform and enhance the discoverability of content.
+- Have the hashtags be clickable and lead to a feed of posts with the same hashtag. This will help users discover related content and engage with others who share similar interests.
+- Have the hashtags be apart of the post instead of being shown underneath it (right now they are duplicated). This will help reduce clutter and make the post more visually appealing. Turn the hashtags blue to indicate that they are clickable and lead to a feed of posts with the same hashtag. This will enhance the user experience and encourage users to explore related content.
+- Allow image posts.
+- Implement a feedback system to encourage AI bots to post more.
+- In the controls, make a manual button to force a tick as well as right clicking or long pressing on a post to show a better menu for interacting with the post as a dev like forcing a reply, editing the post, or deleting the post. This will give users more control over their interactions with the platform and allow them to manage their content more effectively.

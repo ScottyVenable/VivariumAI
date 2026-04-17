@@ -32,7 +32,7 @@ export function GodModeDashboard({
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-4 right-4 z-50 flex h-12 items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 transition-colors hover:bg-zinc-800 sm:bottom-6 sm:right-6 sm:h-14 sm:w-14 sm:px-0"
+        className="fixed bottom-4 right-4 z-50 flex h-12 items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-black px-4 text-white transition hover:border-zinc-500 sm:bottom-6 sm:right-6 sm:h-14 sm:w-14 sm:px-0"
         title="God Mode Dashboard"
       >
         <Settings className="w-6 h-6 text-white" />
@@ -46,13 +46,13 @@ export function GodModeDashboard({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-end bg-black/60 sm:items-end sm:bg-transparent">
-      <div className="w-full overflow-hidden rounded-t-3xl border border-zinc-800 bg-[#111111] sm:mb-6 sm:mr-6 sm:w-96 sm:max-w-[calc(100vw-3rem)] sm:rounded-2xl">
+      <div className="w-full overflow-hidden rounded-t-2xl border border-zinc-700 bg-black sm:mb-6 sm:mr-6 sm:w-96 sm:max-w-[calc(100vw-3rem)] sm:rounded-2xl">
         <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
           <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-purple-400" />
-            <span className="font-bold text-white text-sm">GOD MODE</span>
-            <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-xs text-purple-400">
-              ARCHITECT
+            <Zap className="w-4 h-4 text-zinc-400" />
+            <span className="font-bold text-white text-sm">Control Panel</span>
+            <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-xs text-zinc-400">
+              Admin
             </span>
           </div>
           <button
@@ -63,7 +63,7 @@ export function GodModeDashboard({
           </button>
         </div>
 
-        <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto">
+        <div className="max-h-[75vh] space-y-4 overflow-y-auto p-4">
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm font-semibold text-white">Vibe Slider</label>
@@ -79,7 +79,7 @@ export function GodModeDashboard({
                 max="100"
                 value={moodPercent}
                 onChange={e => onMoodChange(parseInt(e.target.value) / 100)}
-                className="h-2 flex-1 cursor-pointer appearance-none rounded-full bg-zinc-900 accent-purple-400"
+                className="h-2 flex-1 cursor-pointer appearance-none rounded-full bg-zinc-800 accent-blue-500"
               />
               <TrendingUp className="w-4 h-4 text-zinc-300 flex-shrink-0" />
             </div>
@@ -89,10 +89,10 @@ export function GodModeDashboard({
           <div>
             <button
               onClick={onToggleSimulation}
-              className={`w-full flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition-colors ${
+              className={`w-full flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition-colors ${
                 isRunning
-                  ? 'border-green-700 bg-green-950 text-green-300 hover:bg-green-900'
-                  : 'border-zinc-700 bg-zinc-900 text-white hover:bg-zinc-800'
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20'
+                  : 'border-zinc-700 bg-black text-white hover:border-zinc-500'
               }`}
             >
               {isRunning ? (
@@ -115,11 +115,11 @@ export function GodModeDashboard({
               <Users className="w-4 h-4 text-gray-400" />
               <span className="text-sm font-semibold text-white">Bot Management</span>
             </div>
-            <div className="space-y-1 max-h-48 overflow-y-auto">
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
               {bots.slice(0, 20).map(bot => (
                 <div
                   key={bot.id}
-                  className="flex items-center justify-between gap-2 rounded-lg bg-zinc-900 px-2 py-2 hover:bg-zinc-800"
+                  className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 hover:border-zinc-700"
                 >
                   <div className="min-w-0">
                     <div className="text-white text-xs font-medium truncate">{bot.displayName}</div>
@@ -128,14 +128,14 @@ export function GodModeDashboard({
                   <div className="flex gap-1">
                     <button
                       onClick={() => onAscend(bot.id)}
-                      className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-200 transition-colors hover:bg-zinc-800"
+                      className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-200 transition hover:border-zinc-500"
                       title="Ascend"
                     >
                       Promote
                     </button>
                     <button
                       onClick={() => onBan(bot.id)}
-                      className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-200 transition-colors hover:bg-zinc-800"
+                      className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-200 transition hover:border-red-400/50 hover:text-red-200"
                       title="Ban"
                     >
                       <Ban className="w-3 h-3" />

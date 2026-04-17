@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, RefreshCw, Cpu, Trash2 } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Cpu, Globe, Trash2 } from 'lucide-react';
 import { PostCard } from '@/components/PostCard';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { ProfileSheet } from '@/components/ProfileSheet';
@@ -39,6 +39,16 @@ interface Timeline {
   globalMood: number;
   _count: { bots: number; posts: number };
 }
+
+const WORLD_TYPE_LABELS: Record<string, string> = {
+  EARTH_MIRROR: 'Earth Mirror',
+  SYNTHETIC_WORLD: 'Synthetic World',
+};
+
+const formatWorldBadge = (value?: string) => {
+  if (!value) return 'Simulation';
+  return WORLD_TYPE_LABELS[value] ?? value.replace(/_/g, ' ');
+};
 
 interface Bot {
   id: string;
@@ -80,6 +90,9 @@ export default function TimelinePage() {
   const [bots, setBots] = useState<Bot[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [feedPage, setFeedPage] = useState(1);
+  const [feedHasMore, setFeedHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [globalMood, setGlobalMood] = useState(0.5);
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
@@ -149,9 +162,15 @@ export default function TimelinePage() {
       return copy.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
     }
 
+    // For-You: engagement-weighted with a 48-hour recency decay
+    const now = Date.now();
     return copy.sort((a, b) => {
-      const scoreA = a.likeCount + a.replyCount * 2 + (+new Date(a.createdAt) / 1_000_000_000_000);
-      const scoreB = b.likeCount + b.replyCount * 2 + (+new Date(b.createdAt) / 1_000_000_000_000);
+      const ageHoursA = (now - +new Date(a.createdAt)) / (1000 * 60 * 60);
+      const ageHoursB = (now - +new Date(b.createdAt)) / (1000 * 60 * 60);
+      const recencyA = Math.max(0, 48 - ageHoursA) * 1.5;
+      const recencyB = Math.max(0, 48 - ageHoursB) * 1.5;
+      const scoreA = a.likeCount * 3 + a.replyCount * 5 + recencyA;
+      const scoreB = b.likeCount * 3 + b.replyCount * 5 + recencyB;
       return scoreB - scoreA;
     });
   }, [feedMode, posts]);
@@ -160,7 +179,7 @@ export default function TimelinePage() {
     try {
       const [timelineRes, feedRes, botsRes] = await Promise.all([
         fetch(`/api/timelines/${timelineId}`),
-        fetch(`/api/timelines/${timelineId}/feed?limit=30`),
+        fetch(`/api/timelines/${timelineId}/feed?limit=30&page=1`),
         fetch(`/api/timelines/${timelineId}/bots`),
       ]);
 
@@ -173,11 +192,36 @@ export default function TimelinePage() {
       setTimeline(tl);
       setGlobalMood(tl.globalMood ?? 0.5);
       setPosts(feedData.posts || []);
+      setFeedPage(1);
+      setFeedHasMore((feedData.posts?.length ?? 0) >= 30 && feedData.page < feedData.totalPages);
       setBots(botsData || []);
     } catch (err) {
       console.error(err);
     }
   }, [timelineId]);
+
+  const loadMorePosts = useCallback(async () => {
+    if (loadingMore || !feedHasMore) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = feedPage + 1;
+      const res = await fetch(`/api/timelines/${timelineId}/feed?limit=30&page=${nextPage}`);
+      if (!res.ok) return;
+      const feedData = await res.json() as Promise<FeedData>;
+      const data = await (Promise.resolve(feedData) as Promise<FeedData>);
+      const newPosts = data.posts || [];
+      setPosts(prev => {
+        const existingIds = new Set(prev.map(p => p.id));
+        return [...prev, ...newPosts.filter(p => !existingIds.has(p.id))];
+      });
+      setFeedPage(nextPage);
+      setFeedHasMore(newPosts.length >= 30 && nextPage < data.totalPages);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [feedPage, feedHasMore, loadingMore, timelineId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -352,6 +396,14 @@ export default function TimelinePage() {
     setSelectedProfileId(botId);
   };
 
+  const handleMentionClick = useCallback((username: string) => {
+    // Look up the bot id from the bots list and open their profile
+    const found = bots.find(b => b.username.toLowerCase() === username.toLowerCase());
+    if (found) {
+      setSelectedProfileId(found.id);
+    }
+  }, [bots]);
+
   const handleSharePost = async (postId: string) => {
     try {
       const url = `${window.location.origin}/timeline/${timelineId}?post=${postId}`;
@@ -403,10 +455,10 @@ export default function TimelinePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-black">
         <div className="text-center">
-          <div className="w-12 h-12 border-2 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-4" />
-          <div className="text-gray-400 text-sm">Initializing timeline...</div>
+          <div className="mx-auto mb-4 h-12 w-12 rounded-full border-2 border-zinc-700 border-t-white animate-spin" />
+          <div className="text-sm text-zinc-400">Initializing timeline...</div>
         </div>
       </div>
     );
@@ -414,86 +466,111 @@ export default function TimelinePage() {
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-black">
-      <header className="sticky top-0 z-40 border-b border-zinc-900 bg-black/95">
-        <div className="max-w-6xl mx-auto px-4 py-3 min-h-14 flex items-center gap-3 sm:gap-4">
-          <Link href="/" className="text-gray-400 hover:text-white transition-colors">
-            <ArrowLeft className="w-5 h-5" />
+      <header className="sticky top-0 z-40 border-b border-zinc-800 bg-black/95 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-4 sm:px-6">
+          <Link
+            href="/"
+            className="rounded-xl border border-zinc-700 p-2 text-zinc-400 transition hover:text-white"
+            aria-label="Back to timelines"
+          >
+            <ArrowLeft className="h-5 w-5" />
           </Link>
-          <div className="flex-1 min-w-0">
-            <h1 className="font-bold text-white text-sm truncate sm:text-base">{timeline?.name}</h1>
-            <div className="text-gray-500 text-xs flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="flex items-center gap-1">
-                <Cpu className="w-3 h-3" />
-                {timeline?._count.bots ?? 0} entities
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+              <span className="rounded-full border border-zinc-700 px-2 py-0.5">
+                {formatWorldBadge(timeline?.worldType)}
               </span>
-              <span>{timeline?._count.posts ?? 0} posts</span>
-              <span className={isSimRunning ? 'text-green-400' : 'text-zinc-500'}>
-                {isSimRunning ? 'Simulation live' : 'Simulation paused'}
+              <span className="text-zinc-600">
+                {timeline ? `ID·${timeline.id.slice(0, 6)}` : 'Local run'}
               </span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-3">
+              <h1 className="text-xl font-semibold text-white sm:text-2xl">{timeline?.name}</h1>
               {llmChipMeta && (
-                <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 ${llmChipMeta.className}`}>
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${llmChipMeta.className}`}
+                >
                   <Cpu className="h-3 w-3" />
                   {llmChipMeta.label}
                 </span>
               )}
             </div>
+            <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-zinc-400">
+              <span className="inline-flex items-center gap-1">
+                <Cpu className="h-3.5 w-3.5 text-zinc-400" />
+                {timeline?._count.bots ?? 0} entities
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Globe className="h-3.5 w-3.5 text-zinc-400" />
+                {timeline?._count.posts ?? 0} posts
+              </span>
+              <span className={isSimRunning ? 'text-emerald-300' : 'text-zinc-500'}>
+                {isSimRunning ? 'Simulation live' : 'Simulation paused'}
+              </span>
+            </div>
           </div>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="rounded-lg border border-zinc-800 bg-[#111111] p-2 text-zinc-400 transition-colors hover:text-white disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-          </button>
-          <button
-            onClick={() => void handleDeleteTimeline()}
-            disabled={deletingTimeline}
-            className="rounded-lg border border-zinc-800 bg-[#111111] p-2 text-zinc-400 transition-colors hover:border-red-900 hover:text-red-300 disabled:opacity-50"
-            aria-label="Delete timeline"
-            title="Delete timeline"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="rounded-xl border border-zinc-700 p-2 text-zinc-400 transition hover:text-white disabled:opacity-40"
+              title="Refresh feed"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={() => void handleDeleteTimeline()}
+              disabled={deletingTimeline}
+              className="rounded-xl border border-zinc-700 p-2 text-zinc-400 transition hover:border-red-400 hover:text-red-200 disabled:opacity-40"
+              aria-label="Delete timeline"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         {shareMessage && (
-          <div className="border-t border-zinc-900 px-4 py-2 text-center text-xs text-zinc-300">
+          <div className="border-t border-zinc-800 bg-black px-4 py-2 text-center text-xs text-zinc-300">
             {shareMessage}
           </div>
         )}
         {timelineDeleteError && (
-          <div className="border-t border-red-900/60 bg-red-950/30 px-4 py-2 text-center text-xs text-red-300">
+          <div className="border-t border-red-400/40 bg-red-500/10 px-4 py-2 text-center text-xs text-red-200">
             {timelineDeleteError}
           </div>
         )}
       </header>
 
-      <div className="mx-auto flex w-full max-w-6xl flex-1 min-h-0 flex-col gap-4 overflow-hidden lg:flex-row lg:gap-6">
+      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-4 pb-[5.5rem] sm:gap-5 sm:px-6 lg:flex-row">
         <PulseSidebar timelineId={timelineId} />
 
-        <main className="order-2 lg:order-1 min-w-0 flex-1 overflow-y-auto border-x border-zinc-900 pb-24 lg:pb-6">
-          <div className="sticky top-0 z-20 border-b border-zinc-900 bg-black/95 backdrop-blur">
-            <div className="border-b border-zinc-900 px-4 py-2">
-              <div className="flex gap-6 text-sm">
-                <button
-                  onClick={() => setFeedMode('for-you')}
-                  className={feedMode === 'for-you' ? 'border-b-2 border-white pb-2 font-bold text-white' : 'pb-2 text-zinc-500'}
-                >
-                  For you
-                </button>
-                <button
-                  onClick={() => setFeedMode('latest')}
-                  className={feedMode === 'latest' ? 'border-b-2 border-white pb-2 font-bold text-white' : 'pb-2 text-zinc-500'}
-                >
-                  Latest
-                </button>
-              </div>
+        <main className="order-2 min-w-0 flex-1 overflow-y-auto rounded-2xl border border-zinc-800 bg-black pb-24 lg:order-1 lg:pb-10">
+          <div className="sticky top-0 z-20 border-b border-zinc-800 bg-black px-4 py-3">
+            <div className="inline-flex rounded-full border border-zinc-700 bg-black p-1 text-[11px] font-semibold text-zinc-500">
+              <button
+                type="button"
+                onClick={() => setFeedMode('for-you')}
+                className={`rounded-full px-4 py-1 transition ${
+                  feedMode === 'for-you' ? 'bg-white text-black' : 'text-zinc-500'
+                }`}
+              >
+                For you
+              </button>
+              <button
+                type="button"
+                onClick={() => setFeedMode('latest')}
+                className={`rounded-full px-4 py-1 transition ${
+                  feedMode === 'latest' ? 'bg-white text-black' : 'text-zinc-500'
+                }`}
+              >
+                Latest
+              </button>
             </div>
           </div>
 
-          <div className="border-b border-zinc-900 px-4 py-3">
-            <div className="rounded-2xl border border-zinc-900 bg-zinc-950/80 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.01)]">
-              <div className="mb-3 flex items-start gap-3">
-                <div className="mt-1 flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 text-sm font-bold text-white">
+          <div className="space-y-6 px-2 py-4 sm:px-4">
+            <section className="mx-auto max-w-3xl rounded-2xl border border-zinc-800 bg-black p-4 sm:p-5">
+              <div className="flex items-start gap-4">
+                <div className="mt-1 flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800 text-sm font-semibold text-white">
                   Y
                 </div>
                 <div className="min-w-0 flex-1">
@@ -510,20 +587,35 @@ export default function TimelinePage() {
                     rows={3}
                     style={{ caretColor: 'auto' }}
                     placeholder="What's happening in your Vivarium?"
-                    className="min-h-[72px] w-full resize-none bg-transparent text-[20px] leading-snug text-white placeholder:text-zinc-600 focus:outline-none"
+                    className="min-h-[72px] w-full resize-none bg-transparent text-lg leading-snug text-white placeholder:text-zinc-500 focus:outline-none"
                   />
-                  <div className="mb-3 text-xs text-blue-400">Everyone can reply</div>
-                  {composerError && <div className="mb-3 text-xs text-red-400">{composerError}</div>}
-                  <div className="flex items-center justify-between border-t border-zinc-900 pt-3">
-                    <div className="text-xs text-zinc-500">Cmd/Ctrl + Enter to post</div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-blue-400">
+                    <span className="rounded-full border border-zinc-700 px-2 py-0.5">
+                      Everyone can reply
+                    </span>
+                  </div>
+                  {composerError && (
+                    <div className="mt-3 rounded-2xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                      {composerError}
+                    </div>
+                  )}
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800 pt-4 text-xs text-zinc-500">
+                    <span>Cmd/Ctrl + Enter to post</span>
                     <div className="flex items-center gap-3">
-                      <span className={`text-xs ${newPostText.trim().length > adminConfig.content.warningLength ? 'text-orange-400' : 'text-zinc-500'}`}>
+                      <span
+                        className={
+                          newPostText.trim().length > adminConfig.content.warningLength
+                            ? 'text-orange-300'
+                            : 'text-zinc-400'
+                        }
+                      >
                         {newPostText.trim().length}/{adminConfig.content.maxLength}
                       </span>
                       <button
+                        type="button"
                         onClick={() => void handleCreatePost()}
                         disabled={!newPostText.trim() || posting || newPostText.trim().length > adminConfig.content.maxLength}
-                        className="rounded-full bg-white px-4 py-2 text-sm font-bold text-black transition-opacity hover:opacity-90 disabled:opacity-40"
+                        className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition hover:bg-zinc-100 disabled:opacity-40"
                       >
                         {posting ? 'Posting…' : 'Post'}
                       </button>
@@ -531,28 +623,48 @@ export default function TimelinePage() {
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
+            </section>
 
-          {posts.length === 0 ? (
-            <div className="py-16 text-center border-b border-zinc-900">
-              <div className="text-zinc-400 text-sm">
-                The timeline is silent. Press Play in the Control panel to wake the entities.
-              </div>
-            </div>
-          ) : (
-            sortedPosts.map(post => (
-              <PostCard
-                key={post.id}
-                post={post}
-                liked={likedPostIds.has(post.id)}
-                onLike={handleLike}
-                onOpen={handleOpenPost}
-                onShare={handleSharePost}
-                onOpenProfile={handleOpenProfile}
-              />
-            ))
-          )}
+            <section className="mx-auto max-w-3xl space-y-4">
+              {posts.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-zinc-700 px-6 py-12 text-center text-sm text-zinc-400">
+                  The timeline is silent. Press Play in God Mode to wake the entities.
+                </div>
+              ) : (
+                <>
+                  {sortedPosts.map(post => (
+                    <PostCard
+                      key={post.id}
+                      post={post}
+                      liked={likedPostIds.has(post.id)}
+                      onLike={handleLike}
+                      onOpen={handleOpenPost}
+                      onShare={handleSharePost}
+                      onOpenProfile={handleOpenProfile}
+                      onMentionClick={handleMentionClick}
+                    />
+                  ))}
+                  {feedHasMore && (
+                    <div className="flex justify-center pt-2">
+                      <button
+                        type="button"
+                        onClick={() => void loadMorePosts()}
+                        disabled={loadingMore}
+                        className="rounded-full border border-zinc-700 bg-black px-6 py-2 text-sm font-semibold text-white transition hover:border-zinc-500 disabled:opacity-50"
+                      >
+                        {loadingMore ? 'Loading…' : 'Load more posts'}
+                      </button>
+                    </div>
+                  )}
+                  {!feedHasMore && posts.length > 0 && (
+                    <div className="py-6 text-center text-xs text-zinc-500">
+                      You&apos;ve reached the beginning of time.
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
+          </div>
         </main>
       </div>
 
