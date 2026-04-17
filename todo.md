@@ -1,3 +1,3 @@
-1. Implement playwrite support for testing.
-2. Ensure all dev scripts are cross-platform compatible, including Windows PowerShell support for the dev server and Android local build/run.
-3. 
+Move the prompts file from feat/ui-improvements to the dev branch and then organize the dev branch codebase please. Then identify any improvements needed across UI, features, testing, AI integration, etc. And optimize. Then commit.
+
+After that, I would like you to create a new branch from dev called "feat/login-system" to add features for logging in with a custom database where we store users who can register or login using their email and a password with a sleek UI design similar to a typical social media site. Modern of course like the app should be. 
