@@ -37,3 +37,6 @@ prisma/vivarium.db-journal
 # playwright
 playwright-report
 test-results
+
+# internal dev docs (not for repo)
+docs/dev (gitignore this)/
