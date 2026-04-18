@@ -32,8 +32,9 @@ export function GodModeDashboard({
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-4 right-4 z-50 flex h-12 items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 transition-colors hover:bg-zinc-800 sm:bottom-6 sm:right-6 sm:h-14 sm:w-14 sm:px-0"
+        className="fixed bottom-20 right-4 z-50 flex h-12 items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 transition-colors hover:bg-zinc-800 md:bottom-6 md:right-6 md:h-14 md:w-14 md:px-0"
         title="God Mode Dashboard"
+        aria-label="Open God Mode Dashboard"
       >
         <Settings className="w-6 h-6 text-white" />
         <span className="text-sm font-semibold text-white sm:hidden">Control</span>
