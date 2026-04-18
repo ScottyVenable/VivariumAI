@@ -468,7 +468,7 @@ export default function TimelinePage() {
       </header>
 
       <div className="mx-auto flex w-full max-w-6xl flex-1 min-h-0 flex-col gap-4 overflow-hidden lg:flex-row lg:gap-6">
-        <div className="hidden lg:block lg:order-2 lg:flex-shrink-0">
+        <div className="hidden lg:block order-2 flex-shrink-0">
           <PulseSidebar timelineId={timelineId} />
         </div>
 
